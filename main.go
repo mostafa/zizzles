@@ -8,14 +8,15 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/goccy/go-yaml"
 	"github.com/mostafa/zizzles/audit_rules"
+	"github.com/mostafa/zizzles/schema"
 	"github.com/mostafa/zizzles/types"
 )
 
 func main() {
 	// Parse command line arguments
 	// TODO: update the flags based on the features.
-	verbose := flag.Bool("verbose", false, "Enable verbose output")
 	summary := flag.Bool("summary", true, "Show summary of findings")
 	quiet := flag.Bool("quiet", false, "Quiet mode")
 	flag.Parse()
@@ -51,14 +52,21 @@ func main() {
 			continue
 		}
 
+		// Unmarshal the metadata
+		var metadata schema.GithubActionJson
+		if err := yaml.Unmarshal(content, &metadata); err != nil {
+			log.Printf("Failed to unmarshal metadata: %v", err)
+			os.Exit(1)
+		}
+
+		fmt.Printf("File is valid: %s\n", file)
+
 		// Find patterns in the file
 		findings := make(map[types.Category]*types.Finding)
 		for _, rule := range rules {
 			patternFindings, err := types.FindPattern(absPath, &rule)
 			if err != nil {
-				if *verbose {
-					log.Printf("Error finding pattern %s in %s: %v", rule.Pattern, absPath, err)
-				}
+				log.Printf("Error finding pattern %s in %s: %v", rule.Pattern, absPath, err)
 				continue
 			}
 
