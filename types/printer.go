@@ -1,11 +1,10 @@
-package registry
+package types
 
 import (
 	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mostafa/zizzles/types"
 )
 
 const (
@@ -25,12 +24,12 @@ const (
 
 var (
 	// Styles for different parts of the output
-	severityStyles = map[types.Severity]lipgloss.Style{
-		types.SeverityCritical: lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")).Bold(true),
-		types.SeverityHigh:     lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")),
-		types.SeverityMedium:   lipgloss.NewStyle().Foreground(lipgloss.Color("#FFA500")),
-		types.SeverityLow:      lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00")),
-		types.SeverityInfo:     lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00")),
+	severityStyles = map[Severity]lipgloss.Style{
+		SeverityCritical: lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")).Bold(true),
+		SeverityHigh:     lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")),
+		SeverityMedium:   lipgloss.NewStyle().Foreground(lipgloss.Color("#FFA500")),
+		SeverityLow:      lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00")),
+		SeverityInfo:     lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00")),
 	}
 
 	lineNumberStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#0087d7"))
@@ -53,7 +52,7 @@ func NewPrinter(content []byte, file string) *Printer {
 }
 
 // PrintFindings prints all findings with context
-func (p *Printer) PrintFindings(findings map[string]*types.Finding) {
+func (p *Printer) PrintFindings(findings map[Category]*Finding) {
 	if len(findings) == 0 {
 		fmt.Printf("\n%sNo untrusted code fetching patterns detected.%s\n", ColorGreen, ColorReset)
 		return
@@ -62,18 +61,18 @@ func (p *Printer) PrintFindings(findings map[string]*types.Finding) {
 	fmt.Println(logo)
 
 	// Group findings by severity
-	severityGroups := make(map[types.Severity][]*types.Finding)
+	severityGroups := make(map[Severity][]*Finding)
 	for _, finding := range findings {
 		severityGroups[finding.Severity] = append(severityGroups[finding.Severity], finding)
 	}
 
 	// Print findings by severity (critical first, then high, medium, low, informational)
-	severities := []types.Severity{
-		types.SeverityCritical,
-		types.SeverityHigh,
-		types.SeverityMedium,
-		types.SeverityLow,
-		types.SeverityInfo,
+	severities := []Severity{
+		SeverityCritical,
+		SeverityHigh,
+		SeverityMedium,
+		SeverityLow,
+		SeverityInfo,
 	}
 	for _, severity := range severities {
 		if findings, ok := severityGroups[severity]; ok {
@@ -85,14 +84,14 @@ func (p *Printer) PrintFindings(findings map[string]*types.Finding) {
 }
 
 // printFindingWithContext prints a finding with its context
-func (p *Printer) printFindingWithContext(finding *types.Finding) {
+func (p *Printer) printFindingWithContext(finding *Finding) {
 	// Get the severity style
 	severityStyle := severityStyles[finding.Severity]
 
 	// Build the finding header
 	var header strings.Builder
 	header.WriteString(severityStyle.Render(string(finding.Severity)))
-	header.WriteString(severityStyle.Render("[" + finding.Rule.Category + "]"))
+	header.WriteString(severityStyle.Render("[" + string(finding.Rule.Category) + "]"))
 	header.WriteString(": ")
 	header.WriteString(messageStyle.Render(finding.Rule.Message))
 	fmt.Println(header.String())

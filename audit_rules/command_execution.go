@@ -4,42 +4,45 @@ import (
 	"github.com/mostafa/zizzles/types"
 )
 
+const CategoryCommandExecution types.Category = "command_execution"
+
 // GetCommandExecutionRules returns rules for command execution patterns
-func GetCommandExecutionRules() RuleSet {
-	return RuleSet{
-		Category: "command_execution",
+func GetCommandExecutionRules() types.RuleSet {
+	return types.RuleSet{
+		Category: CategoryCommandExecution,
 		Rules: []types.Rule{
 			{
-				Category: "command_execution",
+				Category: CategoryCommandExecution,
 				Pattern:  "bash -c",
 				Severity: types.SeverityCritical,
 				Message:  "Direct bash command execution",
 			},
 			{
-				Category: "command_execution",
+				Category: CategoryCommandExecution,
 				Pattern:  "sh -c",
 				Severity: types.SeverityCritical,
 				Message:  "Direct shell command execution",
 			},
 			{
-				Category: "command_execution",
+				Category: CategoryCommandExecution,
 				Pattern:  "eval",
 				Severity: types.SeverityCritical,
 				Message:  "Command evaluation detected",
 			},
 			{
-				Category: "command_execution",
+				Category: CategoryCommandExecution,
 				Pattern:  "exec",
 				Severity: types.SeverityHigh,
 				Message:  "Command execution detected",
 			},
 			{
-				Category: "command_execution",
+				Category: CategoryCommandExecution,
 				Pattern:  "system",
 				Severity: types.SeverityHigh,
 				Message:  "System command execution",
 			},
 			{
+				Category: CategoryCommandExecution,
 				Pattern:  `\bcurl -sSfL\b`,
 				Severity: types.SeverityCritical,
 				Message:  "Direct command execution using curl -sSfL",

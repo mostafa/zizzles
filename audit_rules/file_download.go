@@ -4,13 +4,15 @@ import (
 	"github.com/mostafa/zizzles/types"
 )
 
+const CategoryFileDownload types.Category = "file_download"
+
 // GetFileDownloadRules returns a set of rules for detecting file downloads
-func GetFileDownloadRules() RuleSet {
-	return RuleSet{
-		Category: "file_download",
+func GetFileDownloadRules() types.RuleSet {
+	return types.RuleSet{
+		Category: CategoryFileDownload,
 		Rules: []types.Rule{
 			{
-				Category: "file_download",
+				Category: CategoryFileDownload,
 				Pattern:  `\bwget\b`,
 				Severity: types.SeverityHigh,
 				Message:  "File download using wget",
@@ -18,7 +20,7 @@ func GetFileDownloadRules() RuleSet {
 If those cannot be used, consider verifying the contents and integrity of the downloaded file using a checksum or signature.`,
 			},
 			{
-				Category: "file_download",
+				Category: CategoryFileDownload,
 				Pattern:  `\bcurl\b(?!.*fetch-depth)(?!.*download-artifacts)`,
 				Severity: types.SeverityHigh,
 				Message:  "File download using curl",
@@ -26,13 +28,13 @@ If those cannot be used, consider verifying the contents and integrity of the do
 If those cannot be used, consider verifying the contents and integrity of the downloaded file using a checksum or signature.`,
 			},
 			{
-				Category: "file_download",
+				Category: CategoryFileDownload,
 				Pattern:  "\\bdownload\\b(?!-artifacts|\\s*:)", // Exclude download-artifacts and download: syntax
 				Severity: types.SeverityMedium,
 				Message:  "File download operation detected",
 			},
 			{
-				Category: "file_download",
+				Category: CategoryFileDownload,
 				Pattern:  "\\bfetch\\b(?!-depth|\\s*:)", // Exclude fetch-depth and fetch: syntax
 				Severity: types.SeverityMedium,
 				Message:  "File fetch operation detected",

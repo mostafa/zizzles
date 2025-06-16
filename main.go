@@ -9,8 +9,6 @@ import (
 	"path/filepath"
 
 	"github.com/mostafa/zizzles/audit_rules"
-	"github.com/mostafa/zizzles/finding"
-	"github.com/mostafa/zizzles/registry"
 	"github.com/mostafa/zizzles/types"
 )
 
@@ -31,7 +29,7 @@ func main() {
 	rules := audit_rules.GetAllRules()
 
 	// Process each file
-	allFindings := make(map[string]*types.Finding)
+	allFindings := make(map[types.Category]*types.Finding)
 	for _, file := range files {
 		// Get absolute path
 		absPath, err := filepath.Abs(file)
@@ -48,9 +46,9 @@ func main() {
 		}
 
 		// Find patterns in the file
-		findings := make(map[string]*types.Finding)
+		findings := make(map[types.Category]*types.Finding)
 		for _, rule := range rules {
-			patternFindings, err := finding.FindPattern(absPath, &rule)
+			patternFindings, err := types.FindPattern(absPath, &rule)
 			if err != nil {
 				if *verbose {
 					log.Printf("Error finding pattern %s in %s: %v", rule.Pattern, absPath, err)
@@ -59,7 +57,9 @@ func main() {
 			}
 
 			// Add findings to the map
-			maps.Copy(findings, patternFindings)
+			for category, finding := range patternFindings {
+				findings[category] = finding
+			}
 		}
 
 		// Add findings to the global map
@@ -67,14 +67,14 @@ func main() {
 
 		// Print findings for this file if any found
 		if len(findings) > 0 {
-			printer := registry.NewPrinter(content, file)
+			printer := types.NewPrinter(content, file)
 			printer.PrintFindings(findings)
 		}
 	}
 
 	// Create a registry and print summary if requested
 	if len(allFindings) > 0 {
-		reg := registry.New()
+		reg := types.NewRegistry()
 		reg.AddAll(allFindings)
 		if *summary {
 			reg.PrintSummary()
