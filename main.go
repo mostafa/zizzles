@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/goccy/go-yaml"
 	"github.com/mostafa/zizzles/audit_rules"
 	"github.com/mostafa/zizzles/schema"
@@ -59,7 +60,8 @@ func main() {
 			os.Exit(1)
 		}
 
-		fmt.Printf("File is valid: %s\n", file)
+		validStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00")).Bold(true)
+		fmt.Printf("File is valid: %s\n", validStyle.Render(file))
 
 		// Find patterns in the file
 		findings := make(map[types.Category]*types.Finding)

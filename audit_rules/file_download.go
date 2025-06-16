@@ -16,16 +16,16 @@ func GetFileDownloadRules() types.RuleSet {
 				Pattern:  `\bwget\b`,
 				Severity: types.SeverityHigh,
 				Message:  "File download using wget",
-				Suggestion: `Consider using GitHub's built-in actions/checkout or actions/download-artifact instead of direct file downloads.
-If those cannot be used, consider verifying the contents and integrity of the downloaded file using a checksum or signature.`,
+				Suggestion: `1. Consider using GitHub's built-in actions/checkout or actions/download-artifact instead of direct file downloads.
+2. If those cannot be used, consider verifying the contents and integrity of the downloaded file using a checksum or signature.`,
 			},
 			{
 				Category: CategoryFileDownload,
 				Pattern:  `\bcurl\b(?!.*fetch-depth)(?!.*download-artifacts)`,
 				Severity: types.SeverityHigh,
 				Message:  "File download using curl",
-				Suggestion: `Consider using GitHub's built-in actions/checkout or actions/download-artifact instead of direct file downloads.
-If those cannot be used, consider verifying the contents and integrity of the downloaded file using a checksum or signature.`,
+				Suggestion: `1. Consider using GitHub's built-in actions/checkout or actions/download-artifact instead of direct file downloads.
+2. If those cannot be used, consider verifying the contents and integrity of the downloaded file using a checksum or signature.`,
 			},
 			{
 				Category: CategoryFileDownload,

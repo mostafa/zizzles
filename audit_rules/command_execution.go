@@ -46,8 +46,8 @@ func GetCommandExecutionRules() types.RuleSet {
 				Pattern:  `\bcurl -sSfL\b`,
 				Severity: types.SeverityCritical,
 				Message:  "Direct command execution using curl -sSfL",
-				Suggestion: `Consider using GitHub's built-in actions or verified third-party actions instead of direct command execution.
-If those cannot be used, consider verifying the contents and integrity of the downloaded file using a checksum or signature.`,
+				Suggestion: `1. Consider using GitHub's built-in actions or verified third-party actions instead of direct command execution.
+2. If those cannot be used, consider verifying the contents and integrity of the downloaded file using a checksum or signature.`,
 			},
 		},
 	}

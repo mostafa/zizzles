@@ -148,10 +148,10 @@ func (p *Printer) printFindingWithContext(finding *Finding) {
 	// Print suggestion at the bottom if available
 	if finding.Rule != nil && finding.Rule.Suggestion != "" {
 		var suggestion strings.Builder
-		suggestion.WriteString("\n")
 		suggestion.WriteString(lineNumberStyle.Render("Suggestion: "))
-		suggestion.WriteString(finding.Rule.Suggestion)
-		fmt.Println(suggestionStyle.Render(suggestion.String()))
+		suggestion.WriteString("\n  ")
+		suggestion.WriteString(strings.ReplaceAll(finding.Rule.Suggestion, "\n", "\n  "))
+		fmt.Println(suggestion.String())
 	}
 	fmt.Println()
 }
