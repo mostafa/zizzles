@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"maps"
 )
 
 // Registry manages a collection of findings
@@ -23,9 +24,7 @@ func (r *Registry) Add(finding *Finding) {
 
 // AddAll adds multiple findings to the registry
 func (r *Registry) AddAll(findings map[Category]*Finding) {
-	for k, v := range findings {
-		r.findings[k] = v
-	}
+	maps.Copy(r.findings, findings)
 }
 
 // Get returns a finding by category
@@ -77,7 +76,9 @@ func (r *Registry) PrintSummary() {
 		return fmt.Sprintf("%s%d%s", color, num, ColorReset)
 	}
 
-	fmt.Printf("%d finding%s (0 unknown, %s informational, %s low, %s medium, %s high, %s critical)\n",
+	fmt.Printf(
+		"%d finding%s (0 unknown, %s informational, "+
+			"%s low, %s medium, %s high, %s critical)\n",
 		total,
 		plural,
 		colorNum(counts[SeverityInfo], ColorGreen),

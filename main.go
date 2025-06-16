@@ -7,6 +7,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/goccy/go-yaml"
 	"github.com/mostafa/zizzles/audit_rules"
@@ -17,7 +18,6 @@ import (
 func main() {
 	// Parse command line arguments
 	// TODO: update the flags based on the features.
-	summary := flag.Bool("summary", true, "Show summary of findings")
 	quiet := flag.Bool("quiet", false, "Quiet mode")
 	flag.Parse()
 
@@ -63,24 +63,33 @@ func main() {
 
 		// Find patterns in the file
 		findings := make(map[types.Category]*types.Finding)
-		for _, rule := range rules {
-			patternFindings, err := types.FindPattern(absPath, &rule)
-			if err != nil {
-				log.Printf("Error finding pattern %s in %s: %v", rule.Pattern, absPath, err)
-				continue
-			}
 
-			// Add findings to the map
-			maps.Copy(findings, patternFindings)
+		var wg sync.WaitGroup
+		wg.Add(len(rules))
+
+		for _, rule := range rules {
+			go func(rule types.Rule, findings map[types.Category]*types.Finding) {
+				defer wg.Done()
+				patternFindings, err := types.FindPattern(absPath, &rule)
+				if err != nil {
+					log.Printf("Error finding pattern %s in %s: %v", rule.Pattern, absPath, err)
+					return
+				}
+
+				// Add findings to the map
+				maps.Copy(findings, patternFindings)
+			}(rule, findings)
 		}
 
-		// Add findings to the global map
-		maps.Copy(allFindings, findings)
+		wg.Wait()
 
 		// Print findings for this file if any found
 		if len(findings) > 0 {
 			printer := types.NewPrinter(content, file, *quiet)
 			printer.PrintFindings(findings)
+
+			// Add findings to the global map
+			maps.Copy(allFindings, findings)
 		}
 	}
 
@@ -88,9 +97,8 @@ func main() {
 	if len(allFindings) > 0 {
 		reg := types.NewRegistry()
 		reg.AddAll(allFindings)
-		if *summary {
-			reg.PrintSummary()
-		}
+
+		reg.PrintSummary()
 		os.Exit(1)
 	}
 
