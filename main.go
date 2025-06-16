@@ -14,8 +14,10 @@ import (
 
 func main() {
 	// Parse command line arguments
+	// TODO: update the flags based on the features.
 	verbose := flag.Bool("verbose", false, "Enable verbose output")
 	summary := flag.Bool("summary", true, "Show summary of findings")
+	quiet := flag.Bool("quiet", false, "Quiet mode")
 	flag.Parse()
 
 	// Get remaining arguments as files
@@ -23,6 +25,10 @@ func main() {
 	if len(files) == 0 {
 		fmt.Println("Please provide one or more GitHub Action YAML files")
 		os.Exit(1)
+	}
+
+	if !*quiet {
+		fmt.Println(types.Logo)
 	}
 
 	// Get all rules
@@ -57,9 +63,7 @@ func main() {
 			}
 
 			// Add findings to the map
-			for category, finding := range patternFindings {
-				findings[category] = finding
-			}
+			maps.Copy(findings, patternFindings)
 		}
 
 		// Add findings to the global map
@@ -67,7 +71,7 @@ func main() {
 
 		// Print findings for this file if any found
 		if len(findings) > 0 {
-			printer := types.NewPrinter(content, file)
+			printer := types.NewPrinter(content, file, *quiet)
 			printer.PrintFindings(findings)
 		}
 	}
@@ -82,5 +86,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Println("No security findings found.")
+	if !*quiet {
+		fmt.Println("No security findings found.")
+	}
 }

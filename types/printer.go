@@ -7,21 +7,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-const (
-	logo = `⠀⠀⠀⠀⠀⠀⢱⣆⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠈⣿⣷⡀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⢸⣿⣿⣷⣧⠀⠀⠀
-⠀⠀⠀⠀⡀⢠⣿⡟⣿⣿⣿⡇⠀⠀
-⠀⠀⠀⠀⣳⣼⣿⡏⢸⣿⣿⣿⢀⠀
-⠀⠀⠀⣰⣿⣿⡿⠁⢸⣿⣿⡟⣼⡆
-⢰⢀⣾⣿⣿⠟⠀⠀⣾⢿⣿⣿⣿⣿
-⢸⣿⣿⣿⡏⠀⠀⠀⠃⠸⣿⣿⣿⡿
-⢳⣿⣿⣿⠀⠀⠀⠀⠀⠀⢹⣿⡿⡁
-⠀⠹⣿⣿⡄⠀⠀⠀⠀⠀⢠⣿⡞⠁
-⠀⠀⠈⠛⢿⣄⠀⠀⠀⣠⠞⠋⠀⠀
-⠀⠀⠀⠀⠀⠀⠉⠀⠀⠀⠀⠀⠀⠀`
-)
-
 var (
 	// Styles for different parts of the output
 	severityStyles = map[Severity]lipgloss.Style{
@@ -41,24 +26,23 @@ var (
 type Printer struct {
 	content []byte
 	file    string
+	quiet   bool
 }
 
 // NewPrinter creates a new Printer
-func NewPrinter(content []byte, file string) *Printer {
+func NewPrinter(content []byte, file string, quiet bool) *Printer {
 	return &Printer{
 		content: content,
 		file:    file,
+		quiet:   quiet,
 	}
 }
 
 // PrintFindings prints all findings with context
 func (p *Printer) PrintFindings(findings map[Category]*Finding) {
-	if len(findings) == 0 {
-		fmt.Printf("\n%sNo untrusted code fetching patterns detected.%s\n", ColorGreen, ColorReset)
+	if p.quiet {
 		return
 	}
-
-	fmt.Println(logo)
 
 	// Group findings by severity
 	severityGroups := make(map[Severity][]*Finding)
