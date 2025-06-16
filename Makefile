@@ -8,3 +8,11 @@ update-schema:
 	@go-jsonschema -p github.com/mostafa/zizzles/schema -o schema/github-action.go schema/github-action.json
 	@go mod tidy
 	@echo "Done"
+
+.PHONY: build-release
+build-release:
+	@go build -o zizzles -trimpath-ldflags "-s -w" main.go
+
+.PHONY: build-debug
+build-debug:
+	@go build -o zizzles main.go
