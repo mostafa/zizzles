@@ -237,6 +237,10 @@ func (r *ExpressionInjectionRule) traverseForRunBlocks(node ast.Node, path []str
 		r.traverseMappingForRunBlocks(n, path, runBlocks)
 	case *ast.SequenceNode:
 		r.traverseSequenceForRunBlocks(n, path, runBlocks)
+	case *ast.DocumentNode:
+		if n.Body != nil {
+			r.traverseForRunBlocks(n.Body, path, runBlocks)
+		}
 	}
 }
 
@@ -539,18 +543,4 @@ func GetExpressionInjectionRules() types.RuleSet {
 			},
 		},
 	}
-}
-
-// Public API functions for backward compatibility
-
-// ExtractExpressions extracts all expressions from a string
-func ExtractExpressions(value string) []string {
-	rule := NewExpressionInjectionRule()
-	return rule.extractExpressions(value)
-}
-
-// ToEnvName converts an expression to a safe environment variable name
-func ToEnvName(expression string) string {
-	rule := NewExpressionInjectionRule()
-	return rule.toEnvName(expression)
 }
