@@ -2,38 +2,39 @@ package types
 
 import (
 	"fmt"
-	"maps"
 )
 
 // Registry manages a collection of findings
 type Registry struct {
-	findings map[Category]*Finding
+	findings map[Category][]*Finding
 }
 
 // NewRegistry creates a new Registry
 func NewRegistry() *Registry {
 	return &Registry{
-		findings: make(map[Category]*Finding),
+		findings: make(map[Category][]*Finding),
 	}
 }
 
 // Add adds a finding to the registry
 func (r *Registry) Add(finding *Finding) {
-	r.findings[finding.Rule.Category] = finding
+	r.findings[finding.Rule.Category] = append(r.findings[finding.Rule.Category], finding)
 }
 
 // AddAll adds multiple findings to the registry
-func (r *Registry) AddAll(findings map[Category]*Finding) {
-	maps.Copy(r.findings, findings)
+func (r *Registry) AddAll(findings map[Category][]*Finding) {
+	for cat, fs := range findings {
+		r.findings[cat] = append(r.findings[cat], fs...)
+	}
 }
 
 // Get returns a finding by category
-func (r *Registry) Get(category Category) *Finding {
+func (r *Registry) Get(category Category) []*Finding {
 	return r.findings[category]
 }
 
 // GetAll returns all findings
-func (r *Registry) GetAll() map[Category]*Finding {
+func (r *Registry) GetAll() map[Category][]*Finding {
 	return r.findings
 }
 
@@ -47,8 +48,10 @@ func (r *Registry) CountBySeverity() map[Severity]int {
 		SeverityInfo:     0,
 	}
 
-	for _, finding := range r.findings {
-		counts[finding.Severity]++
+	for _, fs := range r.findings {
+		for _, finding := range fs {
+			counts[finding.Severity]++
+		}
 	}
 
 	return counts
@@ -57,8 +60,10 @@ func (r *Registry) CountBySeverity() map[Severity]int {
 // GroupBySeverity returns findings grouped by severity
 func (r *Registry) GroupBySeverity() map[Severity][]*Finding {
 	groups := make(map[Severity][]*Finding)
-	for _, finding := range r.findings {
-		groups[finding.Severity] = append(groups[finding.Severity], finding)
+	for _, fs := range r.findings {
+		for _, finding := range fs {
+			groups[finding.Severity] = append(groups[finding.Severity], finding)
+		}
 	}
 	return groups
 }
@@ -66,7 +71,10 @@ func (r *Registry) GroupBySeverity() map[Severity][]*Finding {
 // PrintSummary prints a summary of findings with colored numbers
 func (r *Registry) PrintSummary() {
 	counts := r.CountBySeverity()
-	total := len(r.findings)
+	total := 0
+	for _, fs := range r.findings {
+		total += len(fs)
+	}
 	plural := ""
 	if total > 1 {
 		plural = "s"

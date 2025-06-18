@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -39,15 +40,17 @@ func NewPrinter(content []byte, file string, quiet bool) *Printer {
 }
 
 // PrintFindings prints all findings with context
-func (p *Printer) PrintFindings(findings map[Category]*Finding) {
+func (p *Printer) PrintFindings(findings map[Category][]*Finding) {
 	if p.quiet {
 		return
 	}
 
 	// Group findings by severity
 	severityGroups := make(map[Severity][]*Finding)
-	for _, finding := range findings {
-		severityGroups[finding.Severity] = append(severityGroups[finding.Severity], finding)
+	for _, findingList := range findings {
+		for _, finding := range findingList {
+			severityGroups[finding.Severity] = append(severityGroups[finding.Severity], finding)
+		}
 	}
 
 	// Print findings by severity (critical first, then high, medium, low, informational)
@@ -84,55 +87,82 @@ func (p *Printer) printFindingWithContext(finding *Finding) {
 	var location strings.Builder
 	location.WriteString("  --> ")
 	location.WriteString(p.file)
-	location.WriteString(fmt.Sprintf(":%d:%d", finding.Line, finding.Column))
+	location.WriteString(fmt.Sprintf(":%d:%d", finding.Line, finding.ActualColumn))
 	fmt.Println(location.String())
 
 	fileLines := strings.Split(string(p.content), "\n")
 	start := finding.Line - 3
 	start = max(0, start)
 	end := finding.Line
+
+	// For multiline blocks, show more context
+	if end < len(fileLines) && (strings.Contains(fileLines[end-1], "run: |") || strings.Contains(fileLines[end-1], "run: >")) {
+		end = min(end+5, len(fileLines)) // Show up to 5 more lines for multiline content
+	}
 	end = min(end, len(fileLines))
 
 	// Build context lines
 	var context strings.Builder
 	for i, line := range fileLines[start:end] {
 		ln := start + i + 1
-		// Truncate long lines with ellipsis
-		if len(line) > 120 {
-			line = line[:117] + "..."
-		}
 
 		// If this is the line with the finding, highlight the matched text
 		if ln == finding.Line {
-			// Calculate the start and end positions of the matched text
-			startPos := finding.Column - 1
-			endPos := startPos
-			if finding.Rule != nil {
-				pattern := finding.Rule.Pattern
-				pattern = strings.ReplaceAll(pattern, `\b`, "")
-				endPos = startPos + len(pattern)
+			// Check if this is a multiline block start
+			if strings.Contains(line, "run: |") || strings.Contains(line, "run: >") {
+				// For multiline blocks, the expression is on subsequent lines
+				// Don't highlight anything on this line
+			} else {
+				// For inline expressions, highlight the specific expression at the correct column
+				if strings.Contains(line, "${{") {
+					// Find the expression at the specific column position
+					exprRe := regexp.MustCompile(`\$\{\{[^}]+\}\}`)
+					matches := exprRe.FindAllStringIndex(line, -1)
+
+					// Find the match that starts at or near the finding's column
+					for _, match := range matches {
+						matchStart := match[0] + 1 // Convert to 1-based column
+						if matchStart <= finding.ActualColumn && finding.ActualColumn <= matchStart+len(line[match[0]:match[1]]) {
+							// This is the correct expression to highlight
+							before := line[:match[0]]
+							after := line[match[1]:]
+							matchedExpr := line[match[0]:match[1]]
+
+							var lineBuilder strings.Builder
+							lineBuilder.WriteString(before)
+							lineBuilder.WriteString(severityStyle.Render(matchedExpr))
+							lineBuilder.WriteString(after)
+							line = lineBuilder.String()
+							break
+						}
+					}
+				}
 			}
-			if endPos == startPos {
-				endPos = startPos + 1
+		} else if ln > finding.Line && finding.MatchedLength > 0 {
+			// Check if this line contains the specific expression (for multiline blocks)
+			if strings.Contains(line, "${{") {
+				// Find the expression at the specific column position
+				exprRe := regexp.MustCompile(`\$\{\{[^}]+\}\}`)
+				matches := exprRe.FindAllStringIndex(line, -1)
+
+				// Find the match that starts at or near the finding's column
+				for _, match := range matches {
+					matchStart := match[0] + 1 // Convert to 1-based column
+					if matchStart <= finding.ActualColumn && finding.ActualColumn <= matchStart+len(line[match[0]:match[1]]) {
+						// This is the correct expression to highlight
+						before := line[:match[0]]
+						after := line[match[1]:]
+						matchedExpr := line[match[0]:match[1]]
+
+						var lineBuilder strings.Builder
+						lineBuilder.WriteString(before)
+						lineBuilder.WriteString(severityStyle.Render(matchedExpr))
+						lineBuilder.WriteString(after)
+						line = lineBuilder.String()
+						break
+					}
+				}
 			}
-
-			// Get the indentation
-			indent := len(line) - len(strings.TrimLeft(line, " "))
-			// Adjust positions to account for indentation
-			startPos = indent + (finding.Column - 1)
-			endPos = startPos + (endPos - (finding.Column - 1))
-
-			// Split the line into parts
-			before := line[:startPos]
-			matched := line[startPos:endPos]
-			after := line[endPos:]
-
-			// Build the line with the matched text in severity color
-			var lineBuilder strings.Builder
-			lineBuilder.WriteString(before)
-			lineBuilder.WriteString(severityStyle.Render(matched))
-			lineBuilder.WriteString(after)
-			line = lineBuilder.String()
 		}
 
 		// Build the output line
@@ -144,14 +174,5 @@ func (p *Printer) printFindingWithContext(finding *Finding) {
 		context.WriteString("\n")
 	}
 	fmt.Print(context.String())
-
-	// Print suggestion at the bottom if available
-	if finding.Rule != nil && finding.Rule.Suggestion != "" {
-		var suggestion strings.Builder
-		suggestion.WriteString(lineNumberStyle.Render("Suggestion: "))
-		suggestion.WriteString("\n  ")
-		suggestion.WriteString(strings.ReplaceAll(finding.Rule.Suggestion, "\n", "\n  "))
-		fmt.Println(suggestion.String())
-	}
 	fmt.Println()
 }

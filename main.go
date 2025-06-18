@@ -4,10 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"maps"
 	"os"
 	"path/filepath"
-	"sync"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/goccy/go-yaml"
@@ -33,11 +31,11 @@ func main() {
 		fmt.Println(types.Logo)
 	}
 
-	// Get all rules
-	rules := audit_rules.GetAllRules()
+	// Create rule executor with all registered rules
+	executor := audit_rules.CreateRuleExecutor()
 
 	// Process each file
-	allFindings := make(map[types.Category]*types.Finding)
+	allFindings := make(map[types.Category][]*types.Finding)
 	for _, file := range files {
 		// Get absolute path
 		absPath, err := filepath.Abs(file)
@@ -63,27 +61,12 @@ func main() {
 		validStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00")).Bold(true)
 		fmt.Printf("File is valid: %s\n", validStyle.Render(file))
 
-		// Find patterns in the file
-		findings := make(map[types.Category]*types.Finding)
-
-		var wg sync.WaitGroup
-		wg.Add(len(rules))
-
-		for _, rule := range rules {
-			go func(rule types.Rule, findings map[types.Category]*types.Finding) {
-				defer wg.Done()
-				patternFindings, err := types.FindPattern(absPath, &rule)
-				if err != nil {
-					log.Printf("Error finding pattern %s in %s: %v", rule.Pattern, absPath, err)
-					return
-				}
-
-				// Add findings to the map
-				maps.Copy(findings, patternFindings)
-			}(rule, findings)
+		// Execute all rules (AST and pattern-based) using the unified executor
+		findings, err := executor.ExecuteAll(absPath, content)
+		if err != nil {
+			log.Printf("Failed to execute rules on %s: %v", absPath, err)
+			continue
 		}
-
-		wg.Wait()
 
 		// Print findings for this file if any found
 		if len(findings) > 0 {
@@ -91,7 +74,9 @@ func main() {
 			printer.PrintFindings(findings)
 
 			// Add findings to the global map
-			maps.Copy(allFindings, findings)
+			for cat, fs := range findings {
+				allFindings[cat] = append(allFindings[cat], fs...)
+			}
 		}
 	}
 

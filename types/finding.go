@@ -19,8 +19,10 @@ type Finding struct {
 	Value             string
 	MatchedColumn     int
 	MatchedLineOffset int
+	MatchedLength     int
 	Severity          Severity
-	Suggestion        string
+	Indentation       int // Number of spaces/tabs for indentation
+	ActualColumn      int // Column position including indentation
 }
 
 // NewFinding creates a new Finding from a rule and match information
@@ -32,6 +34,7 @@ func NewFinding(
 	value string,
 	matchedColumn,
 	matchedLineOffset int,
+	matchedLength int,
 ) *Finding {
 	return &Finding{
 		Rule:              rule,
@@ -41,9 +44,115 @@ func NewFinding(
 		Value:             value,
 		MatchedColumn:     matchedColumn,
 		MatchedLineOffset: matchedLineOffset,
+		MatchedLength:     matchedLength,
 		Severity:          rule.Severity,
-		Suggestion:        rule.Suggestion,
+		Indentation:       0,      // Will be calculated if needed
+		ActualColumn:      column, // Default to column, will be updated if needed
 	}
+}
+
+// NewFindingFromAST creates a new Finding from AST node information
+func NewFindingFromAST(
+	rule *Rule,
+	yamlPath string,
+	node ast.Node,
+	path []string,
+	matchedColumn,
+	matchedLineOffset int,
+	matchedLength int,
+) *Finding {
+	var value string
+	var line, column int
+
+	switch n := node.(type) {
+	case *ast.StringNode:
+		value = n.Value
+		line = n.GetToken().Position.Line
+		column = n.GetToken().Position.Column
+	case *ast.LiteralNode:
+		value = n.String()
+		line = n.GetToken().Position.Line
+		column = n.GetToken().Position.Column
+	default:
+		// Fallback for other node types
+		value = node.String()
+		line = 1
+		column = 1
+	}
+
+	// Calculate the actual line and column for multiline strings
+	actualLine := line
+	indentation := 0
+
+	if strings.Contains(value, "\n") {
+		// For multiline strings, we need to calculate the actual column
+		// by finding the indentation of the line containing the match
+		contentBeforeMatch := value[:matchedColumn]
+
+		if strings.Contains(contentBeforeMatch, "\n") {
+			// Find which line contains the match
+			lineParts := strings.Split(contentBeforeMatch, "\n")
+			actualLine = line + len(lineParts) - 1
+
+			// Calculate the column position within the current line
+			column = len(lineParts[len(lineParts)-1]) + 1 // +1 for 1-based column
+		} else {
+			// Match is on the first line, column is relative to the start
+			column = column + matchedColumn
+		}
+	} else {
+		// Single line, add the matched column offset
+		column = column + matchedColumn
+	}
+
+	// Calculate actual indentation by reading the file
+	indentation = calculateIndentation(yamlPath, actualLine)
+
+	return &Finding{
+		Rule:              rule,
+		YamlPath:          strings.Join(path, "."),
+		Line:              actualLine,
+		Column:            column,
+		Value:             value,
+		MatchedColumn:     matchedColumn,
+		MatchedLineOffset: matchedLineOffset,
+		MatchedLength:     matchedLength,
+		Severity:          rule.Severity,
+		Indentation:       indentation,
+		ActualColumn:      indentation + column,
+	}
+}
+
+// calculateIndentation calculates the actual indentation
+func calculateIndentation(filePath string, line int) int {
+	// Read the file content
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return 0
+	}
+
+	// Split into lines
+	lines := strings.Split(string(content), "\n")
+	if line <= 0 || line > len(lines) {
+		return 0
+	}
+
+	// Get the actual line (1-based to 0-based)
+	actualLine := lines[line-1]
+
+	// Calculate indentation (count leading spaces/tabs)
+	indentation := 0
+	for _, char := range actualLine {
+		if char == ' ' {
+			indentation++
+		} else if char == '\t' {
+			indentation += 4 // Assume tab is 4 spaces
+		} else {
+			break
+		}
+	}
+
+	return indentation
 }
 
 // String returns a string representation of the finding
@@ -140,6 +249,7 @@ func (v *patternVisitor) Visit(node ast.Node) ast.Visitor {
 					str.Value,
 					loc[0],
 					0,
+					len(str.Value),
 				)
 
 				// Add the finding to the map
@@ -169,5 +279,44 @@ func SeverityColor(severity Severity) string {
 		return "\033[32m"
 	default:
 		return "\033[0m"
+	}
+}
+
+// NodeVisitor defines an interface for visiting YAML AST nodes
+// Each rule that wants to inspect nodes should implement this
+// findings slice is shared and appended to by all visitors
+type NodeVisitor interface {
+	VisitNode(node ast.Node, path []string, filePath string, findings *[]*Finding)
+}
+
+// WalkAST traverses the YAML AST and applies all registered NodeVisitors
+func WalkAST(node ast.Node, path []string, filePath string, visitors []NodeVisitor, findings *[]*Finding) {
+	if node == nil {
+		return
+	}
+	for _, visitor := range visitors {
+		visitor.VisitNode(node, path, filePath, findings)
+	}
+	switch n := node.(type) {
+	case *ast.DocumentNode:
+		// Document nodes contain the root content
+		if n.Body != nil {
+			WalkAST(n.Body, path, filePath, visitors, findings)
+		}
+	case *ast.MappingNode:
+		for i := 0; i < len(n.Values); i++ {
+			key := n.Values[i].Key
+			value := n.Values[i].Value
+			if key == nil || value == nil {
+				continue
+			}
+			currentPath := append(path, key.String())
+			WalkAST(value, currentPath, filePath, visitors, findings)
+		}
+	case *ast.SequenceNode:
+		for i, value := range n.Values {
+			currentPath := append(path, fmt.Sprintf("[%d]", i))
+			WalkAST(value, currentPath, filePath, visitors, findings)
+		}
 	}
 }
