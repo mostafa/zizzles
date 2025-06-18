@@ -46,12 +46,15 @@ func GetRulesByCategory(category types.Category) []types.Rule {
 func GetASTRules() []*types.ASTRule {
 	astRules := []*types.ASTRule{}
 
-	// Add expression injection AST rule
+	// Create expression injection rule instance
+	expressionRule := NewExpressionInjectionRule()
+
+	// Add expression injection AST rule - this handles the core detection
 	astRules = append(astRules, &types.ASTRule{
 		Category: CategoryExpressionInjection,
 		Severity: types.SeverityHigh,
 		Message:  "Untrusted input expression found in run block - potential command injection",
-		Visitor:  NewExpressionInjectionDetector(),
+		Visitor:  expressionRule.detector,
 	})
 
 	return astRules
@@ -61,14 +64,11 @@ func GetASTRules() []*types.ASTRule {
 func GetPatternRules() []*types.PatternRule {
 	patternRules := []*types.PatternRule{}
 
-	// Add pattern-based rules from expression injection
+	// Add pattern-based rules from expression injection (edge cases only)
 	expressionRules := GetExpressionInjectionRules()
 	for _, rule := range expressionRules.Rules {
-		// Skip the first rule as it's now handled by AST
-		if rule.Pattern == `(?m)^\s*run:\s*\|\s*$(?:\s*[^\n]*\$\{\{[^}]+\}\}[^\n]*\n?)+` {
-			continue
-		}
-
+		// Only include pattern-based rules for specific edge cases
+		// The core expression injection detection is now handled by AST
 		patternRules = append(patternRules, &types.PatternRule{
 			Category: rule.Category,
 			Pattern:  rule.Pattern,
@@ -95,4 +95,9 @@ func CreateRuleExecutor() *types.RuleExecutor {
 	}
 
 	return executor
+}
+
+// GetExpressionInjectionRuleInstance returns a new instance of the expression injection rule
+func GetExpressionInjectionRuleInstance() *ExpressionInjectionRule {
+	return NewExpressionInjectionRule()
 }
