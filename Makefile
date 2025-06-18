@@ -11,7 +11,7 @@ update-schema:
 
 .PHONY: build-release
 build-release:
-	@go build -o zizzles -trimpath-ldflags "-s -w" main.go
+	@go build -o zizzles -trimpath -ldflags "-s -w" main.go
 
 .PHONY: build-debug
 build-debug:
