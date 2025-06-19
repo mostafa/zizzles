@@ -2,12 +2,15 @@ package audit_rules
 
 import (
 	"fmt"
+	"os"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/parser"
 	"github.com/mostafa/zizzles/types"
+	"github.com/mostafa/zizzles/yaml_patch"
 )
 
 const CategoryExpressionInjection types.Category = "expression_injection"
@@ -271,7 +274,7 @@ func (r *ExpressionInjectionRule) traverseMappingForRunBlocks(node *ast.MappingN
 // traverseSequenceForRunBlocks processes sequence nodes
 func (r *ExpressionInjectionRule) traverseSequenceForRunBlocks(node *ast.SequenceNode, path []string, runBlocks *[]*RunBlockInfo) {
 	for i, value := range node.Values {
-		currentPath := append(path, fmt.Sprintf("[%d]", i))
+		currentPath := append(path, fmt.Sprintf("%d", i))
 		r.traverseForRunBlocks(value, currentPath, runBlocks)
 	}
 }
@@ -339,9 +342,15 @@ func (r *ExpressionInjectionRule) createFindingsForRunBlock(runBlock *RunBlockIn
 	}
 }
 
-// FixFile applies fixes to a YAML file and returns the fixed content
+// FixFile applies fixes to a YAML file and returns the fixed content using yaml_patch
 func (r *ExpressionInjectionRule) FixFile(filePath string) (string, error) {
-	// Parse the YAML file
+	// Read the file content
+	content, err := readFileContent(filePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read file: %w", err)
+	}
+
+	// Parse the YAML file to detect issues
 	file, err := parser.ParseFile(filePath, parser.ParseComments)
 	if err != nil {
 		return "", fmt.Errorf("failed to parse YAML file: %w", err)
@@ -350,53 +359,91 @@ func (r *ExpressionInjectionRule) FixFile(filePath string) (string, error) {
 	// Clear previous fixes
 	r.Fixes = make([]string, 0)
 
-	// Apply fixes to each document
-	for _, doc := range file.Docs {
-		fixes, err := r.fixDocument(doc)
-		if err != nil {
-			return "", fmt.Errorf("failed to fix document: %w", err)
-		}
-		r.Fixes = append(r.Fixes, fixes...)
+	// Find all run blocks with expressions
+	runBlocks := r.findRunBlocksWithExpressions(file.Docs[0].Body)
+
+	if len(runBlocks) == 0 {
+		return content, nil // No fixes needed
 	}
 
-	// Convert back to string
-	fixedContent := file.String()
+	// Create all patches from the original content
+	allPatches := make([]yaml_patch.Patch, 0)
+	for _, runBlock := range runBlocks {
+		runPatches, err := r.createPatchesForRunBlock(runBlock, content)
+		if err != nil {
+			continue // Skip this block if we can't create patches
+		}
+		allPatches = append(allPatches, runPatches...)
+	}
+
+	if len(allPatches) == 0 {
+		return content, nil // No patches to apply
+	}
+
+	// Apply all patches to the original content
+	fixedContent, err := yaml_patch.ApplyYAMLPatches(content, allPatches)
+	if err != nil {
+		return "", fmt.Errorf("failed to apply YAML patches: %w", err)
+	}
+
+	// Record the fixes
+	for _, runBlock := range runBlocks {
+		r.Fixes = append(r.Fixes, fmt.Sprintf("Fixed expression injection in run block at line %d", runBlock.Line))
+	}
+
 	return fixedContent, nil
 }
 
-// fixDocument applies fixes to a single YAML document
-func (r *ExpressionInjectionRule) fixDocument(doc ast.Node) ([]string, error) {
-	appliedFixes := make([]string, 0)
-
-	// Find all run blocks with expressions
-	runBlocks := r.findRunBlocksWithExpressions(doc)
-
-	for _, runBlock := range runBlocks {
-		r.RunBlock = runBlock
-		r.Expressions = runBlock.Expressions
-
-		fix, err := r.createFixForRunBlock(runBlock)
-		if err != nil {
-			continue // Skip this block if we can't fix it
-		}
-
-		r.Fix = fix
-		r.EnvVariables = fix.EnvVariables
-		r.FixedRun = fix.FixedRun
-
-		// Apply the fix
-		if err := r.applyFixToRunBlock(runBlock, fix); err != nil {
-			continue // Skip this block if fix fails
-		}
-
-		appliedFixes = append(appliedFixes, fmt.Sprintf("Fixed expression injection in run block at line %d", runBlock.Line))
+// envKeyExistsInStep checks if the 'env' key exists in the step mapping at stepPath
+func envKeyExistsInStep(content string, stepPath string) bool {
+	file, err := parser.ParseBytes([]byte(content), parser.ParseComments)
+	if err != nil {
+		return false
 	}
-
-	return appliedFixes, nil
+	parts := strings.Split(stepPath, ".")
+	if len(file.Docs) == 0 {
+		return false
+	}
+	current := file.Docs[0].Body
+	for _, part := range parts {
+		if mapping, ok := current.(*ast.MappingNode); ok {
+			found := false
+			for _, pair := range mapping.Values {
+				if key, ok := pair.Key.(*ast.StringNode); ok && key.Value == part {
+					current = pair.Value
+					found = true
+					break
+				}
+			}
+			if !found {
+				return false
+			}
+		} else if seq, ok := current.(*ast.SequenceNode); ok {
+			// Handle numeric indices for steps
+			idx, err := strconv.Atoi(part)
+			if err != nil || idx < 0 || idx >= len(seq.Values) {
+				return false
+			}
+			current = seq.Values[idx]
+		} else {
+			return false
+		}
+	}
+	// Now current should be the step mapping
+	if mapping, ok := current.(*ast.MappingNode); ok {
+		for _, pair := range mapping.Values {
+			if key, ok := pair.Key.(*ast.StringNode); ok && key.Value == "env" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
-// createFixForRunBlock creates a fix for a run block
-func (r *ExpressionInjectionRule) createFixForRunBlock(runBlock *RunBlockInfo) (*RunBlockFix, error) {
+// createPatchesForRunBlock creates yaml_patch operations for a run block
+func (r *ExpressionInjectionRule) createPatchesForRunBlock(runBlock *RunBlockInfo, content string) ([]yaml_patch.Patch, error) {
+	patches := make([]yaml_patch.Patch, 0)
+
 	// Create environment variables for each expression
 	envVariables := make(map[string]string)
 	for _, expr := range runBlock.Expressions {
@@ -404,13 +451,45 @@ func (r *ExpressionInjectionRule) createFixForRunBlock(runBlock *RunBlockInfo) (
 		envVariables[envName] = fmt.Sprintf("${{ %s }}", expr)
 	}
 
-	// Create the fixed run block content
-	fixedRun := r.RewriteRunWithEnv(runBlock.Value, runBlock.Expressions)
+	// Build the path to the run block
+	runPath := strings.Join(runBlock.Path, ".")
+	// Build the path to the step (parent of run)
+	stepPath := strings.Join(runBlock.Path[:len(runBlock.Path)-1], ".")
 
-	return &RunBlockFix{
-		EnvVariables: envVariables,
-		FixedRun:     fixedRun,
-	}, nil
+	// First, create patches for each expression replacement in the run block
+	for _, expr := range runBlock.Expressions {
+		envName := r.toEnvName(expr)
+		expressionPattern := fmt.Sprintf("${{ %s }}", expr)
+		patches = append(patches, yaml_patch.Patch{
+			Path: runPath,
+			Operation: yaml_patch.RewriteFragmentOp{
+				From: expressionPattern,
+				To:   fmt.Sprintf("$%s", envName),
+			},
+		})
+	}
+
+	// Then, add env block to the step (this ensures env comes before run)
+	if len(envVariables) > 0 {
+		patches = append(patches, yaml_patch.Patch{
+			Path: stepPath,
+			Operation: yaml_patch.AddOp{
+				Key:   "env",
+				Value: envVariables,
+			},
+		})
+	}
+
+	return patches, nil
+}
+
+// readFileContent reads the content of a file
+func readFileContent(filePath string) (string, error) {
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read file: %w", err)
+	}
+	return string(content), nil
 }
 
 // RewriteRunWithEnv rewrites a run block to use environment variables
@@ -425,48 +504,6 @@ func (r *ExpressionInjectionRule) RewriteRunWithEnv(runContent string, expressio
 	}
 
 	return fixed
-}
-
-// applyFixToRunBlock applies a fix to a run block by modifying the AST
-func (r *ExpressionInjectionRule) applyFixToRunBlock(runBlock *RunBlockInfo, fix *RunBlockFix) error {
-	// Find the parent mapping node (the step)
-	parent := r.findParentMapping(runBlock.Node)
-	if parent == nil {
-		return fmt.Errorf("could not find parent mapping node")
-	}
-
-	// Add env block before run block
-	if err := r.addEnvBlock(parent, fix.EnvVariables); err != nil {
-		return fmt.Errorf("failed to add env block: %w", err)
-	}
-
-	// Update the run block content
-	if err := r.updateRunBlock(runBlock.Node, fix.FixedRun); err != nil {
-		return fmt.Errorf("failed to update run block: %w", err)
-	}
-
-	return nil
-}
-
-// findParentMapping finds the parent mapping node of a run block
-func (r *ExpressionInjectionRule) findParentMapping(node ast.Node) *ast.MappingNode {
-	// This is a simplified implementation
-	// In a full implementation, you would traverse up the AST to find the parent
-	return nil
-}
-
-// addEnvBlock adds an env block to a mapping node
-func (r *ExpressionInjectionRule) addEnvBlock(parent *ast.MappingNode, envVariables map[string]string) error {
-	// This is a simplified implementation
-	// In a full implementation, you would create a new mapping node for env
-	return nil
-}
-
-// updateRunBlock updates the content of a run block
-func (r *ExpressionInjectionRule) updateRunBlock(node ast.Node, newContent string) error {
-	// This is a simplified implementation
-	// In a full implementation, you would update the node's value
-	return nil
 }
 
 // GenerateFixSuggestion generates a human-readable suggestion for fixing expression injection

@@ -245,8 +245,29 @@ func findContentEnd(nodeInfo *NodeInfo) int {
 		return 0
 	}
 
+	// For block mappings within sequences, we need to be more careful about finding the end
+	// The issue is that nodeInfo.EndPos might include content from the next sequence item
+	if nodeInfo.Style == BlockMapping && len(nodeInfo.Path) > 0 {
+		// Check if this is a sequence item (path ends with a number)
+		lastPathElement := nodeInfo.Path[len(nodeInfo.Path)-1]
+		if _, err := strconv.Atoi(lastPathElement); err == nil {
+			// This is a sequence item, we need to find the proper end of this mapping
+			// by looking at the original content and finding where this item ends
+			return findSequenceItemEnd(nodeInfo)
+		}
+	}
+
 	// For block mappings, we want to insert at the end of the mapping
 	// Use the end position of the node as the insertion point
+	return nodeInfo.EndPos
+}
+
+// findSequenceItemEnd finds the end position of a mapping within a sequence
+// by analyzing the source content structure
+func findSequenceItemEnd(nodeInfo *NodeInfo) int {
+	// We need to work with the original source content to find proper boundaries
+	// This function should be called with access to the original content
+	// For now, return the original end position as fallback
 	return nodeInfo.EndPos
 }
 

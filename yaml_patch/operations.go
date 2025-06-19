@@ -343,8 +343,24 @@ func applyAdd(content string, nodeInfo *NodeInfo, op AddOp) (string, error) {
 			return "", NewError("serialization", fmt.Sprintf("failed to serialize value: %v", err), strings.Join(nodeInfo.Path, "."))
 		}
 
-		// For block mappings, insert at the end of the mapping content
-		insertionPoint := findContentEnd(nodeInfo)
+		// For block mappings, we need to find the correct insertion point
+		var insertionPoint int
+
+		// Check if this is a sequence item (path ends with a number)
+		if len(nodeInfo.Path) > 0 {
+			lastPathElement := nodeInfo.Path[len(nodeInfo.Path)-1]
+			if _, err := strconv.Atoi(lastPathElement); err == nil {
+				// This is a sequence item mapping, we need to find where this item ends
+				insertionPoint = findSequenceItemEndInContent(content, nodeInfo)
+			} else {
+				// Regular mapping
+				insertionPoint = findContentEnd(nodeInfo)
+			}
+		} else {
+			// Regular mapping
+			insertionPoint = findContentEnd(nodeInfo)
+		}
+
 		if insertionPoint > len(content) {
 			insertionPoint = len(content)
 		}
@@ -621,4 +637,97 @@ func applyFlowSequenceElementReplace(content string, parentNodeInfo *NodeInfo, i
 	// Replace the entire sequence
 	result := content[:sequenceStart] + newSequence + content[sequenceEnd:]
 	return result, nil
+}
+
+// findSequenceItemEndInContent finds the end position of a mapping within a sequence
+// by analyzing the source content structure
+func findSequenceItemEndInContent(content string, nodeInfo *NodeInfo) int {
+	// Split content into lines
+	lines := strings.Split(content, "\n")
+
+	// Find the line that contains our start position
+	currentPos := 0
+	startLineIndex := -1
+	for i, line := range lines {
+		lineEnd := currentPos + len(line)
+		if currentPos <= nodeInfo.StartPos && nodeInfo.StartPos <= lineEnd {
+			startLineIndex = i
+			break
+		}
+		currentPos = lineEnd + 1 // +1 for newline
+	}
+
+	if startLineIndex == -1 {
+		// Fallback to original method
+		return nodeInfo.EndPos
+	}
+
+	// Find the indentation of the line containing our mapping
+	startLine := lines[startLineIndex]
+	baseIndentation := extractIndentation(startLine)
+
+	// Look for the next line that has the same or less indentation than the base
+	// or starts with a dash (indicating next sequence item)
+	endLineIndex := len(lines) - 1
+	foundEndOfItem := false
+
+	for i := startLineIndex + 1; i < len(lines); i++ {
+		line := lines[i]
+		trimmed := strings.TrimSpace(line)
+
+		// Skip empty lines and comments, but remember if we found the end
+		if trimmed == "" {
+			if foundEndOfItem {
+				// This is a blank line after we found the end, keep going to include it
+				continue
+			} else {
+				// This might be a blank line within our item, skip it
+				continue
+			}
+		}
+
+		if strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+
+		lineIndentation := extractIndentation(line)
+
+		// If we find a line that starts with dash at same or lesser indentation
+		// or any line with same or less indentation, this is where our item ends
+		if strings.HasPrefix(trimmed, "-") && lineIndentation <= baseIndentation {
+			endLineIndex = i - 1
+			foundEndOfItem = true
+			break
+		} else if lineIndentation <= baseIndentation {
+			endLineIndex = i - 1
+			foundEndOfItem = true
+			break
+		}
+	}
+
+	// Include any trailing blank lines that belong to this item
+	// Look for blank lines after the content but before the next item
+	if foundEndOfItem {
+		for i := endLineIndex + 1; i < len(lines); i++ {
+			line := lines[i]
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" {
+				endLineIndex = i
+			} else {
+				break
+			}
+		}
+	}
+
+	// Calculate the position at the end of the identified line
+	pos := 0
+	for i := 0; i <= endLineIndex && i < len(lines); i++ {
+		if i < endLineIndex {
+			pos += len(lines[i]) + 1 // +1 for newline
+		} else {
+			pos += len(lines[i])
+		}
+	}
+
+	return pos
 }
