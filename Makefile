@@ -39,3 +39,8 @@ run-help:
 	@echo "  make run ARGS='run --severity high example.yml'"
 	@echo "  make run ARGS='doc expression-injection'"
 	@echo "  make run ARGS='--help'"
+
+.PHONY: doc
+doc:
+	@make build-debug
+	@./zizzles doc

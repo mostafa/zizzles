@@ -1,4 +1,4 @@
-# Expression Injection Detection
+# Expression Injection
 
 ## Overview
 
