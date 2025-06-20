@@ -38,6 +38,7 @@ type ExpressionInjectionRule struct {
 	Fixes               []string
 	detector            *ExpressionInjectionDetector
 	contextCapabilities map[string]ContextCapability
+	seenFindings        map[string]bool // For deduplication
 }
 
 // RunBlockInfo contains information about a run block that needs fixing
@@ -83,6 +84,7 @@ func NewExpressionInjectionRule() *ExpressionInjectionRule {
 		Findings:            make([]*types.Finding, 0),
 		Fixes:               make([]string, 0),
 		contextCapabilities: initializeContextCapabilities(),
+		seenFindings:        make(map[string]bool),
 	}
 
 	rule.detector = &ExpressionInjectionDetector{rule: rule}
@@ -719,8 +721,8 @@ func (r *ExpressionInjectionRule) addExpressionInjectionFinding(node ast.Node, p
 			len(exprCtx.Raw),
 		)
 
-		*findings = append(*findings, finding)
-		r.Findings = append(r.Findings, finding)
+		// Use deduplication when adding the finding
+		r.addFindingIfNotSeen(finding, filePath, expr, findings)
 	}
 }
 
@@ -738,6 +740,28 @@ func (r *ExpressionInjectionRule) capabilityString(capability ContextCapability)
 	}
 }
 
+// generateFindingKey creates a unique key for a finding based on its exact location and content
+// This ensures that the same expression appearing on different lines is not deduplicated
+func (r *ExpressionInjectionRule) generateFindingKey(filePath string, line, column int, expression, yamlPath string) string {
+	return fmt.Sprintf("%s:%d:%d:%s:%s", filePath, line, column, expression, yamlPath)
+}
+
+// addFindingIfNotSeen adds a finding only if it hasn't been seen before
+func (r *ExpressionInjectionRule) addFindingIfNotSeen(finding *types.Finding, filePath string, expression string, findings *[]*types.Finding) {
+	// Generate a unique key for this finding based on location and expression content
+	key := r.generateFindingKey(filePath, finding.Line, finding.Column, expression, finding.YamlPath)
+
+	// Check if we've already seen this finding
+	if r.seenFindings[key] {
+		return // Skip duplicate
+	}
+
+	// Mark as seen and add to findings
+	r.seenFindings[key] = true
+	*findings = append(*findings, finding)
+	r.Findings = append(r.Findings, finding)
+}
+
 // DetectExpressionsInFile detects expression injection vulnerabilities in a file
 func (r *ExpressionInjectionRule) DetectExpressionsInFile(filePath string) error {
 	// Parse the YAML file
@@ -746,8 +770,9 @@ func (r *ExpressionInjectionRule) DetectExpressionsInFile(filePath string) error
 		return fmt.Errorf("failed to parse YAML file: %w", err)
 	}
 
-	// Clear previous findings
+	// Clear previous findings and reset deduplication map for this file
 	r.Findings = make([]*types.Finding, 0)
+	r.seenFindings = make(map[string]bool)
 
 	// Detect expressions in each document
 	for _, doc := range file.Docs {
@@ -759,6 +784,11 @@ func (r *ExpressionInjectionRule) DetectExpressionsInFile(filePath string) error
 
 // detectExpressionsInDocument detects expressions in a single document
 func (r *ExpressionInjectionRule) detectExpressionsInDocument(doc ast.Node, filePath string) {
+	// Initialize deduplication map if not already done
+	if r.seenFindings == nil {
+		r.seenFindings = make(map[string]bool)
+	}
+
 	// Find all vulnerable blocks with expressions (run, shell, if, etc.)
 	vulnerableBlocks := r.findVulnerableBlocksWithExpressions(doc)
 
@@ -1024,7 +1054,10 @@ func (r *ExpressionInjectionRule) createFindingsForRunBlock(runBlock *RunBlockIn
 			len(exprCtx.Raw),
 		)
 
-		r.Findings = append(r.Findings, finding)
+		// Use deduplication when adding the finding
+		// Create a temporary slice for the findings parameter
+		var tempFindings []*types.Finding
+		r.addFindingIfNotSeen(finding, filePath, expr, &tempFindings)
 	}
 }
 
@@ -1212,6 +1245,12 @@ func (r *ExpressionInjectionRule) GetExpressions() []string {
 // GetEnvVariables returns the environment variables mapping
 func (r *ExpressionInjectionRule) GetEnvVariables() map[string]string {
 	return r.EnvVariables
+}
+
+// ResetDeduplication resets the deduplication state for testing purposes
+func (r *ExpressionInjectionRule) ResetDeduplication() {
+	r.seenFindings = make(map[string]bool)
+	r.Findings = make([]*types.Finding, 0)
 }
 
 // GetExpressionInjectionRules returns a set of rules for detecting expression injections

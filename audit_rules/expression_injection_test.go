@@ -287,7 +287,7 @@ func TestExpressionInjectionRule_ASTDetection(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to parse yaml: %v", err)
 			}
-			rule.Findings = nil
+			rule.ResetDeduplication() // Reset state between subtests
 			for _, doc := range file.Docs {
 				rule.detectExpressionsInDocument(doc, "test.yaml")
 			}
