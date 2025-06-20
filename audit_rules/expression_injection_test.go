@@ -504,24 +504,28 @@ func TestExpressionInjectionRuleWithComplexExpressions(t *testing.T) {
 	require.NoError(t, err)
 
 	findings := rule.GetFindings()
-	assert.Len(t, findings, 5, "Should detect 5 expression injection vulnerabilities")
+	assert.Len(t, findings, 4, "Should detect 4 expression injection vulnerabilities (github.repository is safe)")
 
 	fixedContent, err := rule.FixFile(tmpFile.Name())
 	require.NoError(t, err)
 
-	// Verify environment variables were added
+	// Verify environment variables were added for unsafe expressions only
 	assert.Contains(t, fixedContent, "GITHUB_EVENT_ISSUE_TITLE:")
 	assert.Contains(t, fixedContent, "GITHUB_EVENT_ISSUE_BODY:")
 	assert.Contains(t, fixedContent, "GITHUB_EVENT_ISSUE_USER_LOGIN:")
-	assert.Contains(t, fixedContent, "GITHUB_REPOSITORY:")
 	assert.Contains(t, fixedContent, "GITHUB_REF_NAME:")
 
-	// Verify expressions were replaced
+	// github.repository should NOT have an env var (it's safe)
+	assert.NotContains(t, fixedContent, "GITHUB_REPOSITORY:")
+
+	// Verify unsafe expressions were replaced
 	assert.Contains(t, fixedContent, "$GITHUB_EVENT_ISSUE_TITLE")
 	assert.Contains(t, fixedContent, "$GITHUB_EVENT_ISSUE_BODY")
 	assert.Contains(t, fixedContent, "$GITHUB_EVENT_ISSUE_USER_LOGIN")
-	assert.Contains(t, fixedContent, "$GITHUB_REPOSITORY")
 	assert.Contains(t, fixedContent, "$GITHUB_REF_NAME")
+
+	// github.repository should remain unchanged (it's safe)
+	assert.Contains(t, fixedContent, "${{ github.repository }}")
 }
 
 func TestExpressionInjectionRuleWithNoExpressions(t *testing.T) {
@@ -680,5 +684,379 @@ func TestYAMLPatchAddOpWithSequence(t *testing.T) {
 	expectedContains := "env:"
 	if !strings.Contains(result, expectedContains) {
 		t.Errorf("Expected result to contain '%s', got: %s", expectedContains, result)
+	}
+}
+
+func TestExpressionInjectionRule_ContextAnalysis(t *testing.T) {
+	rule := NewExpressionInjectionRule()
+
+	testCases := []struct {
+		name               string
+		expression         string
+		expectedCapability ContextCapability
+		shouldFlag         bool
+		expectedSeverity   types.Severity
+	}{
+		// Fixed contexts (should not flag)
+		{"GitHub repo", "github.repository", Fixed, false, ""},
+		{"GitHub SHA", "github.sha", Fixed, false, ""},
+		{"GitHub workspace", "github.workspace", Fixed, false, ""},
+		{"Runner arch", "runner.arch", Fixed, false, ""},
+		{"Runner OS", "runner.os", Fixed, false, ""},
+		{"Secrets context", "secrets.API_KEY", Fixed, false, ""},
+		{"Default env var", "env.GITHUB_REPOSITORY", Fixed, false, ""},
+		{"GitHub job", "github.job", Fixed, false, ""},
+		{"GitHub run ID", "github.run_id", Fixed, false, ""},
+
+		// Arbitrary contexts (should flag with high severity)
+		{"Issue title", "github.event.issue.title", Arbitrary, true, types.SeverityHigh},
+		{"PR title", "github.event.pull_request.title", Arbitrary, true, types.SeverityHigh},
+		{"Comment body", "github.event.comment.body", Arbitrary, true, types.SeverityHigh},
+		{"Commit message", "github.event.head_commit.message", Arbitrary, true, types.SeverityHigh},
+		{"User login", "github.event.issue.user.login", Arbitrary, true, types.SeverityHigh},
+		{"GitHub actor", "github.actor", Arbitrary, true, types.SeverityHigh},
+		{"Head ref", "github.head_ref", Arbitrary, true, types.SeverityHigh},
+		{"Base ref", "github.base_ref", Arbitrary, true, types.SeverityHigh},
+		{"Inputs", "inputs.user_input", Arbitrary, true, types.SeverityHigh},
+
+		// Structured contexts (should flag with medium severity)
+		{"Event URL", "github.event.issue.html_url", Structured, true, types.SeverityMedium},
+		{"User avatar URL", "github.event.issue.user.avatar_url", Structured, true, types.SeverityMedium},
+		{"Steps output", "steps.build.outputs.result", Structured, true, types.SeverityMedium},
+		{"Matrix value", "matrix.os", Structured, true, types.SeverityMedium},
+		{"Needs output", "needs.test.outputs.result", Structured, true, types.SeverityMedium},
+		{"Vars context", "vars.BUILD_ENV", Structured, true, types.SeverityMedium},
+		{"Custom env var", "env.CUSTOM_VAR", Structured, true, types.SeverityMedium},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := rule.analyzeExpressionContext(tc.expression)
+
+			if tc.shouldFlag {
+				if ctx == nil {
+					t.Errorf("Expected context to be flagged but got nil")
+					return
+				}
+				if ctx.Capability != tc.expectedCapability {
+					t.Errorf("Expected capability %v, got %v", tc.expectedCapability, ctx.Capability)
+				}
+				if ctx.Severity != tc.expectedSeverity {
+					t.Errorf("Expected severity %v, got %v", tc.expectedSeverity, ctx.Severity)
+				}
+			} else {
+				if ctx != nil {
+					t.Errorf("Expected context to not be flagged but got %+v", ctx)
+				}
+			}
+		})
+	}
+}
+
+func TestExpressionInjectionRule_FilterSafeExpressions(t *testing.T) {
+	rule := NewExpressionInjectionRule()
+
+	yamlContent := `
+name: Test Workflow
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Safe and unsafe expressions
+        run: |
+          echo "Repository: ${{ github.repository }}"
+          echo "SHA: ${{ github.sha }}"
+          echo "Issue title: ${{ github.event.issue.title }}"
+          echo "User input: ${{ inputs.user_data }}"
+          echo "Runner OS: ${{ runner.os }}"
+          echo "Actor: ${{ github.actor }}"
+`
+
+	// Write test file
+	testFile := "test_expressions.yml"
+	err := writeTestFile(testFile, yamlContent)
+	if err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+	defer deleteTestFile(testFile)
+
+	// Test detection
+	err = rule.DetectExpressionsInFile(testFile)
+	if err != nil {
+		t.Fatalf("Failed to detect expressions: %v", err)
+	}
+
+	findings := rule.GetFindings()
+
+	// Should only flag the unsafe expressions
+	expectedUnsafeExpressions := []string{
+		"github.event.issue.title",
+		"inputs.user_data",
+		"github.actor",
+	}
+
+	if len(findings) != len(expectedUnsafeExpressions) {
+		t.Errorf("Expected %d findings, got %d", len(expectedUnsafeExpressions), len(findings))
+	}
+
+	// Check that findings contain expected unsafe expressions
+	foundExpressions := make(map[string]bool)
+	for _, finding := range findings {
+		// Extract expression from message
+		message := finding.Rule.Message
+		for _, expr := range expectedUnsafeExpressions {
+			if strings.Contains(message, expr) {
+				foundExpressions[expr] = true
+			}
+		}
+	}
+
+	for _, expr := range expectedUnsafeExpressions {
+		if !foundExpressions[expr] {
+			t.Errorf("Expected finding for expression '%s' but not found", expr)
+		}
+	}
+}
+
+func TestExpressionInjectionRule_FixGeneration(t *testing.T) {
+	rule := NewExpressionInjectionRule()
+
+	yamlContent := `
+name: Test Workflow
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Unsafe expressions
+        run: |
+          echo "Issue: ${{ github.event.issue.title }}"
+          echo "Safe repo: ${{ github.repository }}"
+          echo "User: ${{ github.actor }}"
+`
+
+	// Write test file
+	testFile := "test_fix.yml"
+	err := writeTestFile(testFile, yamlContent)
+	if err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+	defer deleteTestFile(testFile)
+
+	// Test fix generation
+	fixedContent, err := rule.FixFile(testFile)
+	if err != nil {
+		t.Fatalf("Failed to fix file: %v", err)
+	}
+
+	// Should contain environment variables for unsafe expressions only
+	if !strings.Contains(fixedContent, "GITHUB_EVENT_ISSUE_TITLE:") {
+		t.Error("Expected env var for github.event.issue.title")
+	}
+	if !strings.Contains(fixedContent, "GITHUB_ACTOR:") {
+		t.Error("Expected env var for github.actor")
+	}
+
+	// Should NOT contain environment variables for safe expressions
+	if strings.Contains(fixedContent, "GITHUB_REPOSITORY:") {
+		t.Error("Should not create env var for safe github.repository expression")
+	}
+
+	// Should replace unsafe expressions with env vars in run block
+	if !strings.Contains(fixedContent, "$GITHUB_EVENT_ISSUE_TITLE") {
+		t.Error("Expected replacement of github.event.issue.title with env var")
+	}
+	if !strings.Contains(fixedContent, "$GITHUB_ACTOR") {
+		t.Error("Expected replacement of github.actor with env var")
+	}
+
+	// Should keep safe expressions as-is
+	if !strings.Contains(fixedContent, "${{ github.repository }}") {
+		t.Error("Safe github.repository expression should remain unchanged")
+	}
+}
+
+func TestExpressionInjectionRule_PatternMatching(t *testing.T) {
+	testCases := []struct {
+		name     string
+		str      string
+		pattern  string
+		expected bool
+	}{
+		{"Exact match", "github.event.issue.title", "github.event.issue.title", true},
+		{"Wildcard match", "github.event.issue.user.login", "github.event.*.user.login", true},
+		{"Multiple wildcards", "github.event.pull_request.labels.0.name", "github.event.*.labels.*.name", true},
+		{"No match", "github.repository", "github.event.*", false},
+		{"Partial match fails", "github.event.issue.title.extra", "github.event.issue.title", false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := matchesPattern(tc.str, tc.pattern)
+			if result != tc.expected {
+				t.Errorf("matchesPattern(%q, %q) = %v, expected %v", tc.str, tc.pattern, result, tc.expected)
+			}
+		})
+	}
+}
+
+func TestExpressionInjectionRule_DefaultEnvVars(t *testing.T) {
+	rule := NewExpressionInjectionRule()
+
+	testCases := []struct {
+		name     string
+		envVar   string
+		expected bool
+	}{
+		{"GitHub repo env", "GITHUB_REPOSITORY", true},
+		{"GitHub actor env", "GITHUB_ACTOR", true},
+		{"Runner OS env", "RUNNER_OS", true},
+		{"Custom env var", "CUSTOM_VAR", false},
+		{"Empty string", "", false},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := rule.isDefaultGitHubEnvVar(tc.envVar)
+			if result != tc.expected {
+				t.Errorf("isDefaultGitHubEnvVar(%q) = %v, expected %v", tc.envVar, result, tc.expected)
+			}
+		})
+	}
+}
+
+func TestExpressionInjectionRule_SpecialContextRules(t *testing.T) {
+	rule := NewExpressionInjectionRule()
+
+	// Test github.actor gets special warning
+	ctx := rule.analyzeExpressionContext("github.actor")
+	if ctx == nil {
+		t.Fatal("Expected github.actor to be flagged")
+	}
+	if !strings.Contains(ctx.Context, "spoofed") {
+		t.Error("Expected special warning about github.actor spoofing")
+	}
+	if ctx.Severity != types.SeverityHigh {
+		t.Errorf("Expected high severity for github.actor, got %v", ctx.Severity)
+	}
+
+	// Test head_ref gets high severity
+	ctx = rule.analyzeExpressionContext("github.head_ref")
+	if ctx == nil {
+		t.Fatal("Expected github.head_ref to be flagged")
+	}
+	if ctx.Severity != types.SeverityHigh {
+		t.Errorf("Expected high severity for github.head_ref, got %v", ctx.Severity)
+	}
+}
+
+func TestExpressionInjectionRule_ComplexExpressions(t *testing.T) {
+	rule := NewExpressionInjectionRule()
+
+	yamlContent := `
+name: Complex Expressions Test
+on: pull_request
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Multiple expressions in one run
+        run: |
+          echo "Title: ${{ github.event.pull_request.title }}"
+          echo "Body: ${{ github.event.pull_request.body }}"
+          echo "Repo: ${{ github.repository }}"
+          echo "User: ${{ github.event.pull_request.user.login }}"
+          echo "Safe SHA: ${{ github.sha }}"
+`
+
+	testFile := "test_complex.yml"
+	err := writeTestFile(testFile, yamlContent)
+	if err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+	defer deleteTestFile(testFile)
+
+	// Test detection
+	err = rule.DetectExpressionsInFile(testFile)
+	if err != nil {
+		t.Fatalf("Failed to detect expressions: %v", err)
+	}
+
+	findings := rule.GetFindings()
+
+	// Should flag the unsafe expressions but not safe ones
+	expectedUnsafe := []string{
+		"github.event.pull_request.title",
+		"github.event.pull_request.body",
+		"github.event.pull_request.user.login",
+	}
+
+	// Count findings for each expected unsafe expression
+	foundCount := 0
+	for _, finding := range findings {
+		message := finding.Rule.Message
+		for _, expr := range expectedUnsafe {
+			if strings.Contains(message, expr) {
+				foundCount++
+				break
+			}
+		}
+	}
+
+	if foundCount != len(expectedUnsafe) {
+		t.Errorf("Expected %d unsafe expressions to be flagged, got %d findings", len(expectedUnsafe), foundCount)
+	}
+}
+
+// Test helper functions
+
+func writeTestFile(filename, content string) error {
+	return os.WriteFile(filename, []byte(content), 0644)
+}
+
+func deleteTestFile(filename string) error {
+	return os.Remove(filename)
+}
+
+// Benchmark tests
+
+func BenchmarkExpressionInjectionRule_AnalyzeContext(b *testing.B) {
+	rule := NewExpressionInjectionRule()
+	expression := "github.event.issue.title"
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = rule.analyzeExpressionContext(expression)
+	}
+}
+
+func BenchmarkExpressionInjectionRule_DetectExpressions(b *testing.B) {
+	rule := NewExpressionInjectionRule()
+	yamlContent := `
+name: Benchmark Test
+on: push
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Test step
+        run: |
+          echo "${{ github.event.issue.title }}"
+          echo "${{ github.repository }}"
+          echo "${{ github.actor }}"
+`
+
+	testFile := "benchmark_test.yml"
+	err := writeTestFile(testFile, yamlContent)
+	if err != nil {
+		b.Fatalf("Failed to write test file: %v", err)
+	}
+	defer deleteTestFile(testFile)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_ = rule.DetectExpressionsInFile(testFile)
+		rule.Findings = make([]*types.Finding, 0) // Reset for next iteration
 	}
 }
