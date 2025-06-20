@@ -107,7 +107,7 @@ func runAudit(cmd *cobra.Command, args []string) {
 	if severityLevel != "" {
 		minSeverity, err = parseSeverityLevel(severityLevel)
 		if err != nil {
-			log.Fatalf("Error: %v", err)
+			log.Fatalf("❌ Error: %v", err)
 		}
 	}
 
@@ -120,28 +120,28 @@ func runAudit(cmd *cobra.Command, args []string) {
 	for _, file := range files {
 		absPath, err := filepath.Abs(file)
 		if err != nil {
-			cmd.Printf("Failed to get absolute path for %s: %v", file, err)
+			cmd.Printf("⚠️  Failed to get absolute path for %s: %v\n", file, err)
 			continue
 		}
 
 		content, err := os.ReadFile(absPath)
 		if err != nil {
-			cmd.Printf("Failed to read file %s: %v", absPath, err)
+			cmd.Printf("📁 Failed to read file %s: %v\n", absPath, err)
 			continue
 		}
 
 		var metadata schema.GithubActionJson
 		if err := yaml.Unmarshal(content, &metadata); err != nil {
-			cmd.Printf("Failed to unmarshal metadata: %v", err)
+			cmd.Printf("💥 Failed to unmarshal metadata: %v\n", err)
 			os.Exit(1)
 		}
 
 		validStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00")).Bold(true)
-		fmt.Printf("File is valid: %s\n", validStyle.Render(file))
+		fmt.Printf("✅ File is valid: %s\n", validStyle.Render(file))
 
 		findings, err := executor.ExecuteAll(absPath, content)
 		if err != nil {
-			cmd.Printf("Failed to execute rules on %s: %v", absPath, err)
+			cmd.Printf("🔍 Failed to execute rules on %s: %v\n", absPath, err)
 			continue
 		}
 
@@ -177,8 +177,29 @@ func runAudit(cmd *cobra.Command, args []string) {
 			totalCount += len(findings)
 		}
 
-		fmt.Printf("📊 Showing %d findings with severity %s and above (out of %d total findings)\n",
-			filteredCount, strings.ToUpper(string(minSeverity)), totalCount)
+		// Show filter info with appropriate emoji based on severity level
+		var severityEmoji string
+		switch minSeverity {
+		case types.SeverityCritical:
+			severityEmoji = "🚨"
+		case types.SeverityHigh:
+			severityEmoji = "🔴"
+		case types.SeverityMedium:
+			severityEmoji = "🟡"
+		case types.SeverityLow:
+			severityEmoji = "🟢"
+		case types.SeverityInfo:
+			severityEmoji = "ℹ️"
+		default:
+			severityEmoji = "📊"
+		}
+
+		if severityLevel != "" {
+			fmt.Printf("\n%s Showing %d findings with severity %s and above (out of %d total findings)\n",
+				severityEmoji, filteredCount, strings.ToUpper(string(minSeverity)), totalCount)
+		} else {
+			fmt.Printf("\n📊 Found %d total findings\n", totalCount)
+		}
 
 		reg.PrintSummary()
 
@@ -190,7 +211,7 @@ func runAudit(cmd *cobra.Command, args []string) {
 	}
 
 	if !quiet {
-		fmt.Println("No security findings found.")
+		fmt.Println("🎉 No security findings found. Your GitHub Actions metadata is looking good!")
 	}
 }
 
