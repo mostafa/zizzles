@@ -3,7 +3,6 @@ package yaml_patch
 import (
 	"fmt"
 	"regexp"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -413,18 +412,13 @@ func formatBlockMappingValue(value string, indentation int) string {
 		result := ""
 
 		// For deterministic output, sort keys alphabetically
-		// But for env blocks, we want NODE_ENV first, then DEBUG
 		keys := make([]string, 0, len(parsed))
 		for k := range parsed {
 			keys = append(keys, k)
 		}
 
-		// Special handling for env blocks: NODE_ENV first, then others alphabetically
-		if len(keys) == 2 && slices.Contains(keys, "NODE_ENV") && slices.Contains(keys, "DEBUG") {
-			keys = []string{"NODE_ENV", "DEBUG"}
-		} else {
-			sort.Strings(keys)
-		}
+		// Always sort alphabetically for consistent output
+		sort.Strings(keys)
 
 		for _, k := range keys {
 			v := parsed[k]

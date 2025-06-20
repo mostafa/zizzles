@@ -669,24 +669,13 @@ func findSequenceItemEndInContent(content string, nodeInfo *NodeInfo) int {
 	// Look for the next line that has the same or less indentation than the base
 	// or starts with a dash (indicating next sequence item)
 	endLineIndex := len(lines) - 1
-	foundEndOfItem := false
 
 	for i := startLineIndex + 1; i < len(lines); i++ {
 		line := lines[i]
 		trimmed := strings.TrimSpace(line)
 
-		// Skip empty lines and comments, but remember if we found the end
-		if trimmed == "" {
-			if foundEndOfItem {
-				// This is a blank line after we found the end, keep going to include it
-				continue
-			} else {
-				// This might be a blank line within our item, skip it
-				continue
-			}
-		}
-
-		if strings.HasPrefix(trimmed, "#") {
+		// Skip empty lines and comments within the item
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
 
@@ -696,33 +685,28 @@ func findSequenceItemEndInContent(content string, nodeInfo *NodeInfo) int {
 		// or any line with same or less indentation, this is where our item ends
 		if strings.HasPrefix(trimmed, "-") && lineIndentation <= baseIndentation {
 			endLineIndex = i - 1
-			foundEndOfItem = true
 			break
 		} else if lineIndentation <= baseIndentation {
 			endLineIndex = i - 1
-			foundEndOfItem = true
 			break
 		}
 	}
 
-	// Include any trailing blank lines that belong to this item
-	// Look for blank lines after the content but before the next item
-	if foundEndOfItem {
-		for i := endLineIndex + 1; i < len(lines); i++ {
-			line := lines[i]
-			trimmed := strings.TrimSpace(line)
-			if trimmed == "" {
-				endLineIndex = i
-			} else {
-				break
-			}
+	// Now find the last non-empty line within our item to avoid including trailing blank lines
+	lastContentLineIndex := endLineIndex
+	for i := endLineIndex; i >= startLineIndex; i-- {
+		line := lines[i]
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+			lastContentLineIndex = i
+			break
 		}
 	}
 
-	// Calculate the position at the end of the identified line
+	// Calculate the position at the end of the last content line
 	pos := 0
-	for i := 0; i <= endLineIndex && i < len(lines); i++ {
-		if i < endLineIndex {
+	for i := 0; i <= lastContentLineIndex && i < len(lines); i++ {
+		if i < lastContentLineIndex {
 			pos += len(lines[i]) + 1 // +1 for newline
 		} else {
 			pos += len(lines[i])

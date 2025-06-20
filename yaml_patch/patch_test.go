@@ -111,8 +111,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     env:
-      NODE_ENV: production
       DEBUG: true
+      NODE_ENV: production
 `,
 			wantErr: false,
 		},
