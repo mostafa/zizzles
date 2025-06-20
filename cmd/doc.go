@@ -18,7 +18,6 @@ var availableTopics = map[string]string{
 	"expression-injection": expressionInjectionDocs,
 }
 
-// docCmd represents the doc command for detection rules
 var docCmd = &cobra.Command{
 	Use:   "doc [topic]",
 	Short: "Display detailed documentation for specific detection rules",

@@ -72,10 +72,7 @@ func (p *Printer) PrintFindings(findings map[Category][]*Finding) {
 
 // printFindingWithContext prints a finding with its context
 func (p *Printer) printFindingWithContext(finding *Finding) {
-	// Get the severity style
 	severityStyle := severityStyles[finding.Severity]
-
-	// Build the finding header
 	var header strings.Builder
 	header.WriteString(severityStyle.Render(string(finding.Severity)))
 	header.WriteString(severityStyle.Render("[" + string(finding.Rule.Category) + "]"))
@@ -83,7 +80,6 @@ func (p *Printer) printFindingWithContext(finding *Finding) {
 	header.WriteString(messageStyle.Render(finding.Rule.Message))
 	fmt.Println(header.String())
 
-	// Build the location line
 	var location strings.Builder
 	location.WriteString("  --> ")
 	location.WriteString(p.file)
@@ -95,35 +91,24 @@ func (p *Printer) printFindingWithContext(finding *Finding) {
 	start = max(0, start)
 	end := finding.Line
 
-	// For multiline blocks, show more context
 	if end < len(fileLines) && (strings.Contains(fileLines[end-1], "run: |") || strings.Contains(fileLines[end-1], "run: >")) {
-		end = min(end+5, len(fileLines)) // Show up to 5 more lines for multiline content
+		end = min(end+5, len(fileLines))
 	}
 	end = min(end, len(fileLines))
-
-	// Build context lines
 	var context strings.Builder
 	for i, line := range fileLines[start:end] {
 		ln := start + i + 1
 
-		// If this is the line with the finding, highlight the matched text
 		if ln == finding.Line {
-			// Check if this is a multiline block start
 			if strings.Contains(line, "run: |") || strings.Contains(line, "run: >") {
-				// For multiline blocks, the expression is on subsequent lines
-				// Don't highlight anything on this line
+				// Expression is on subsequent lines for multiline blocks
 			} else {
-				// For inline expressions, highlight the specific expression at the correct column
 				if strings.Contains(line, "${{") {
-					// Find the expression at the specific column position
 					exprRe := regexp.MustCompile(`\$\{\{[^}]+\}\}`)
 					matches := exprRe.FindAllStringIndex(line, -1)
-
-					// Find the match that starts at or near the finding's column
 					for _, match := range matches {
-						matchStart := match[0] + 1 // Convert to 1-based column
+						matchStart := match[0] + 1
 						if matchStart <= finding.ActualColumn && finding.ActualColumn <= matchStart+len(line[match[0]:match[1]]) {
-							// This is the correct expression to highlight
 							before := line[:match[0]]
 							after := line[match[1]:]
 							matchedExpr := line[match[0]:match[1]]
@@ -139,17 +124,13 @@ func (p *Printer) printFindingWithContext(finding *Finding) {
 				}
 			}
 		} else if ln > finding.Line && finding.MatchedLength > 0 {
-			// Check if this line contains the specific expression (for multiline blocks)
 			if strings.Contains(line, "${{") {
-				// Find the expression at the specific column position
 				exprRe := regexp.MustCompile(`\$\{\{[^}]+\}\}`)
 				matches := exprRe.FindAllStringIndex(line, -1)
 
-				// Find the match that starts at or near the finding's column
 				for _, match := range matches {
-					matchStart := match[0] + 1 // Convert to 1-based column
+					matchStart := match[0] + 1
 					if matchStart <= finding.ActualColumn && finding.ActualColumn <= matchStart+len(line[match[0]:match[1]]) {
-						// This is the correct expression to highlight
 						before := line[:match[0]]
 						after := line[match[1]:]
 						matchedExpr := line[match[0]:match[1]]
@@ -165,7 +146,6 @@ func (p *Printer) printFindingWithContext(finding *Finding) {
 			}
 		}
 
-		// Build the output line
 		context.WriteString(lineNumberStyle.Render(""))
 		context.WriteString(fmt.Sprintf("%4d", ln))
 		context.WriteString(lineNumberStyle.Render(" |"))

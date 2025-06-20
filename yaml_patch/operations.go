@@ -155,7 +155,6 @@ func applyRewriteFragment(content string, nodeInfo *NodeInfo, op RewriteFragment
 
 		// Extract the content without quotes
 		innerContent := content[actualStart:actualEnd]
-		fmt.Printf("[DEBUG] applyRewriteFragment: innerContent='%s'\n", innerContent)
 
 		// Do the replacement on the inner content
 		innerSlice := innerContent[bias:]
@@ -169,17 +168,14 @@ func applyRewriteFragment(content string, nodeInfo *NodeInfo, op RewriteFragment
 
 		// Create the patched inner content
 		patchedInnerContent := innerContent[:innerFromStart] + op.To + innerContent[innerFromEnd:]
-		fmt.Printf("[DEBUG] applyRewriteFragment: patchedInnerContent='%s'\n", patchedInnerContent)
 
 		// Replace the inner content while preserving the quotes
 		result := content[:actualStart] + patchedInnerContent + content[actualEnd:]
-		fmt.Printf("[DEBUG] applyRewriteFragment: result='%s'\n", result)
 		return result, nil
 	}
 
 	// Replace the content in the original string
 	result := content[:nodeInfo.StartPos] + patchedContent + content[nodeInfo.EndPos:]
-	fmt.Printf("[DEBUG] applyRewriteFragment: result='%s'\n", result)
 	return result, nil
 }
 

@@ -10,35 +10,24 @@ import (
 type Style int
 
 const (
-	// BlockMapping represents block style mappings
 	BlockMapping Style = iota
-	// BlockSequence represents block style sequences
 	BlockSequence
-	// MultilineFlowMapping represents multiline flow mapping style:
-	// {
-	//   key: value,
-	//   key2: value2
-	// }
+	// MultilineFlowMapping: { key: value, key2: value2 }
 	MultilineFlowMapping
-	// FlowMapping represents single-line flow mapping style: { key: value, key2: value2 }
+	// FlowMapping: { key: value, key2: value2 }
 	FlowMapping
-	// MultilineFlowSequence represents multiline flow sequence style:
-	// [
-	//   item1,
-	//   item2,
-	// ]
+	// MultilineFlowSequence: [ item1, item2, ]
 	MultilineFlowSequence
-	// FlowSequence represents single-line flow sequence style: [ item1, item2, item3 ]
+	// FlowSequence: [ item1, item2, item3 ]
 	FlowSequence
-	// MultilineLiteralScalar represents literal scalar style: |
+	// MultilineLiteralScalar: |
 	MultilineLiteralScalar
-	// MultilineFoldedScalar represents folded scalar style: >
+	// MultilineFoldedScalar: >
 	MultilineFoldedScalar
-	// DoubleQuoted represents double quoted scalar style: "value"
+	// DoubleQuoted: "value"
 	DoubleQuoted
-	// SingleQuoted represents single quoted scalar style: 'value'
+	// SingleQuoted: 'value'
 	SingleQuoted
-	// PlainScalar represents plain scalar style: value
 	PlainScalar
 )
 

@@ -46,10 +46,7 @@ func GetRulesByCategory(category types.Category) []types.Rule {
 func GetASTRules() []*types.ASTRule {
 	astRules := []*types.ASTRule{}
 
-	// Create expression injection rule instance
 	expressionRule := NewExpressionInjectionRule()
-
-	// Add expression injection AST rule - this handles the core detection
 	astRules = append(astRules, &types.ASTRule{
 		Category: CategoryExpressionInjection,
 		Severity: types.SeverityHigh,
@@ -64,11 +61,8 @@ func GetASTRules() []*types.ASTRule {
 func GetPatternRules() []*types.PatternRule {
 	patternRules := []*types.PatternRule{}
 
-	// Add pattern-based rules from expression injection (edge cases only)
 	expressionRules := GetExpressionInjectionRules()
 	for _, rule := range expressionRules.Rules {
-		// Only include pattern-based rules for specific edge cases
-		// The core expression injection detection is now handled by AST
 		patternRules = append(patternRules, &types.PatternRule{
 			Category: rule.Category,
 			Pattern:  rule.Pattern,
@@ -84,12 +78,10 @@ func GetPatternRules() []*types.PatternRule {
 func CreateRuleExecutor() *types.RuleExecutor {
 	executor := types.NewRuleExecutor()
 
-	// Add AST rules
 	for _, rule := range GetASTRules() {
 		executor.AddASTRule(rule)
 	}
 
-	// Add pattern rules
 	for _, rule := range GetPatternRules() {
 		executor.AddPatternRule(rule)
 	}

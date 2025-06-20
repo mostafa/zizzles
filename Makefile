@@ -16,3 +16,7 @@ build-release:
 .PHONY: build-debug
 build-debug:
 	@go build -o zizzles main.go
+
+.PHONY: test
+test:
+	@go test ./... -v

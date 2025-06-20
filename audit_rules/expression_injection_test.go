@@ -678,9 +678,6 @@ func TestYAMLPatchAddOpWithSequence(t *testing.T) {
 		t.Fail()
 	}
 
-	t.Logf("Original: %s", yamlContent)
-	t.Logf("Result: %s", result)
-
 	// Verify the result is valid YAML
 	expectedContains := "env:"
 	if !strings.Contains(result, expectedContains) {
