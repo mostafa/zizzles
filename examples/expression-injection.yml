@@ -1,0 +1,332 @@
+
+# This file demonstrates ALL possible expression injection vulnerabilities that Zizzles can detect:
+#
+# HIGH RISK (Command Execution):
+# - run: Direct shell command injection
+# - shell: Shell type manipulation
+# - working-directory: Path traversal
+# - entrypoint: Docker command injection
+# - args: Docker argument injection
+#
+# MEDIUM RISK (Logic Control & Action Input):
+# - if: Conditional logic manipulation
+# - with: Action input injection (risk depends on action)
+#
+# STRUCTURED RISK (Medium Severity):
+# - URLs, step outputs, matrix values, vars context
+#
+# SAFE CONTEXTS (No alerts):
+# - github.repository, github.sha, runner.*, secrets.*, etc.
+#
+# The file covers:
+# - All vulnerable expression contexts
+# - Different severity levels
+# - Complex nested expressions
+# - Multiple expressions per field
+# - Docker-specific vulnerabilities
+# - Composite and reusable workflow scenarios
+# - Mixed safe/unsafe expressions
+# - Edge cases and formatting variations 
+
+name: Comprehensive Expression Injection Examples
+on:
+  issues:
+    types: [opened, edited]
+  pull_request:
+    types: [opened, edited, synchronize]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      user_input:
+        description: 'User provided input'
+        required: false
+        default: 'default-value'
+      shell_type:
+        description: 'Shell to use'
+        required: false
+        default: 'bash'
+      work_dir:
+        description: 'Working directory'
+        required: false
+        default: '/tmp'
+      command:
+        description: 'Command to run'
+        required: false
+        default: 'echo hello'
+
+jobs:
+  # HIGH RISK CONTEXTS - Command Execution Vulnerabilities
+  command-execution-vulnerabilities:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. RUN FIELD - Most common and dangerous
+      - name: Vulnerable run with issue title
+        run: |
+          echo "Processing issue: ${{ github.event.issue.title }}"
+      
+      - name: Vulnerable run with PR title
+        run: |
+          echo "Processing PR: ${{ github.event.pull_request.title }}"
+      
+      - name: Vulnerable run with comment body
+        run: |
+          echo "Comment received:"
+          echo "${{ github.event.comment.body }}"
+          echo "From user: ${{ github.event.comment.user.login }}"
+      
+      - name: Vulnerable run with commit message
+        run: |
+          echo "Last commit: ${{ github.event.head_commit.message }}"
+      
+      - name: Vulnerable run with actor
+        run: |
+          echo "Triggered by: ${{ github.actor }}"
+      
+      - name: Vulnerable run with branch names
+        run: |
+          echo "Head ref: ${{ github.head_ref }}"
+          echo "Base ref: ${{ github.base_ref }}"
+          echo "Ref name: ${{ github.ref_name }}"
+      
+      - name: Vulnerable run with user inputs
+        run: |
+          echo "User input: ${{ inputs.user_input }}"
+          process-data "${{ inputs.command }}"
+      
+      - name: Vulnerable run with user identifiers
+        run: |
+          echo "Issue author: ${{ github.event.issue.user.login }}"
+          echo "Author email: ${{ github.event.issue.user.email }}"
+          echo "Sender: ${{ github.event.sender.login }}"
+      
+      - name: Vulnerable run with PR details
+        run: |
+          echo "PR body: ${{ github.event.pull_request.body }}"
+          echo "PR author: ${{ github.event.pull_request.user.login }}"
+          echo "Head repo: ${{ github.event.pull_request.head.repo.full_name }}"
+      
+      # 2. SHELL FIELD - Shell selection vulnerability
+      - name: Vulnerable shell selection
+        shell: ${{ inputs.shell_type }}
+        run: echo "This could be dangerous"
+      
+      # 3. WORKING-DIRECTORY FIELD - Path traversal vulnerability
+      - name: Vulnerable working directory
+        working-directory: ${{ inputs.work_dir }}
+        run: ls -la
+      
+      - name: Vulnerable working directory with user input
+        working-directory: /tmp/${{ github.event.issue.user.login }}
+        run: pwd
+      
+      # 4. DOCKER ENTRYPOINT - Container command injection
+      - name: Vulnerable Docker entrypoint
+        uses: docker://alpine
+        with:
+          entrypoint: ${{ inputs.command }}
+          args: ${{ github.event.issue.title }}
+      
+      # 5. DOCKER ARGS - Container argument injection
+      - name: Vulnerable Docker args
+        uses: docker://alpine
+        with:
+          entrypoint: /bin/sh
+          args: |
+            -c
+            echo ${{ github.event.comment.body }}
+
+  # MEDIUM RISK CONTEXTS - Logic Control & Action Input Vulnerabilities
+  logic-control-vulnerabilities:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. IF FIELD - Conditional logic manipulation
+      - name: Vulnerable if condition with actor
+        if: ${{ github.actor == 'trusted-user' }}
+        run: echo "This logic can be bypassed"
+      
+      - name: Vulnerable if condition with issue title
+        if: contains(${{ github.event.issue.title }}, 'deploy')
+        run: echo "Deployment triggered by issue title"
+      
+      - name: Vulnerable if condition with PR title
+        if: startsWith(${{ github.event.pull_request.title }}, 'hotfix')
+        run: echo "Hotfix deployment"
+      
+      - name: Vulnerable if condition with user input
+        if: ${{ inputs.user_input == 'proceed' }}
+        run: echo "User controlled condition"
+      
+      # 2. WITH FIELD - Action input vulnerabilities (risk depends on action)
+      - name: Vulnerable action with user content
+        uses: actions/github-script@v6
+        with:
+          script: |
+            console.log('${{ github.event.issue.body }}')
+            console.log('${{ github.event.comment.body }}')
+      
+      - name: Vulnerable action with user data
+        uses: some/custom-action@v1
+        with:
+          user_script: ${{ github.event.comment.body }}
+          user_name: ${{ github.event.issue.user.login }}
+          message: ${{ github.event.pull_request.title }}
+          branch_name: ${{ github.head_ref }}
+      
+      - name: Vulnerable action with inputs
+        uses: another/action@v1
+        with:
+          command: ${{ inputs.command }}
+          data: ${{ inputs.user_input }}
+
+  # MIXED RISK EXAMPLES - Multiple vulnerability types in one job
+  mixed-vulnerabilities:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Multiple vulnerabilities in one step
+        if: contains(${{ github.event.issue.title }}, 'urgent')
+        shell: ${{ inputs.shell_type }}
+        working-directory: /tmp/${{ github.actor }}
+        run: |
+          echo "Issue: ${{ github.event.issue.title }}"
+          echo "Body: ${{ github.event.issue.body }}"
+          echo "User: ${{ github.event.issue.user.login }}"
+          process-urgent-issue "${{ github.event.issue.title }}"
+        env:
+          # This shows what the fix would look like - but these expressions are still vulnerable in run
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+
+  # STRUCTURED RISK CONTEXTS - Medium severity
+  structured-risk-contexts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: URLs and structured data
+        run: |
+          echo "Issue URL: ${{ github.event.issue.html_url }}"
+          echo "User avatar: ${{ github.event.issue.user.avatar_url }}"
+          echo "API URL: ${{ github.api_url }}"
+      
+      - name: Step outputs and matrix values
+        run: |
+          echo "Previous output: ${{ steps.build.outputs.result }}"
+          echo "Matrix OS: ${{ matrix.os }}"
+          echo "Matrix version: ${{ matrix.node-version }}"
+      
+      - name: Repository variables
+        run: |
+          echo "Build env: ${{ vars.BUILD_ENV }}"
+          echo "Custom var: ${{ vars.CUSTOM_SETTING }}"
+      
+      - name: Job needs and strategy
+        run: |
+          echo "Test result: ${{ needs.test.outputs.status }}"
+          echo "Strategy: ${{ strategy.job-index }}"
+
+  # SAFE CONTEXTS - These should NOT trigger alerts
+  safe-contexts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Safe GitHub contexts
+        run: |
+          echo "Repository: ${{ github.repository }}"
+          echo "SHA: ${{ github.sha }}"
+          echo "Workspace: ${{ github.workspace }}"
+          echo "Job: ${{ github.job }}"
+          echo "Run ID: ${{ github.run_id }}"
+          echo "Workflow: ${{ github.workflow }}"
+          echo "Server URL: ${{ github.server_url }}"
+      
+      - name: Safe runner contexts
+        run: |
+          echo "OS: ${{ runner.os }}"
+          echo "Arch: ${{ runner.arch }}"
+          echo "Temp: ${{ runner.temp }}"
+          echo "Tool cache: ${{ runner.tool_cache }}"
+      
+      - name: Safe secrets (sensitive but not injectable)
+        run: |
+          echo "Using API key"
+        env:
+          API_KEY: ${{ secrets.API_KEY }}
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Safe environment variables (default GitHub ones)
+        run: |
+          echo "Repo from env: ${{ env.GITHUB_REPOSITORY }}"
+          echo "Actor from env: ${{ env.GITHUB_ACTOR }}"
+
+  # EDGE CASES AND COMPLEX SCENARIOS
+  edge-cases:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node-version: [16, 18, 20]
+    steps:
+      - name: Complex nested expressions
+        run: |
+          echo "Complex: ${{ github.event.issue.labels[0].name }}"
+          echo "Nested: ${{ github.event.pull_request.head.repo.name }}"
+          echo "Array access: ${{ github.event.commits[0].message }}"
+      
+      - name: Multiple expressions in single field
+        run: |
+          echo "User ${{ github.actor }} created issue '${{ github.event.issue.title }}' with body: ${{ github.event.issue.body }}"
+      
+      - name: Expressions with whitespace and formatting
+        run: |
+          echo "Formatted: ${{    github.event.issue.title    }}"
+          echo "Multi-line: ${{
+            github.event.comment.body
+          }}"
+      
+      - name: Mixed safe and unsafe expressions
+        run: |
+          echo "Safe repo: ${{ github.repository }}"
+          echo "Unsafe title: ${{ github.event.issue.title }}"
+          echo "Safe SHA: ${{ github.sha }}"
+          echo "Unsafe actor: ${{ github.actor }}"
+
+  # DOCKER-SPECIFIC VULNERABILITIES
+  docker-vulnerabilities:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Vulnerable Docker action
+        uses: docker://alpine:latest
+        with:
+          entrypoint: ${{ github.event.issue.title }}
+          args: |
+            ${{ github.event.comment.body }}
+            ${{ github.actor }}
+        env:
+          USER_DATA: ${{ github.event.issue.body }}
+      
+      - name: Vulnerable custom Docker action
+        uses: ./docker-action
+        with:
+          command: ${{ inputs.command }}
+          script: |
+            #!/bin/bash
+            echo "Processing: ${{ github.event.issue.title }}"
+
+  # COMPOSITE ACTION VULNERABILITIES
+  composite-action-vulnerabilities:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Vulnerable composite action
+        uses: ./.github/actions/custom-action
+        with:
+          issue-title: ${{ github.event.issue.title }}
+          user-input: ${{ inputs.user_input }}
+          branch-name: ${{ github.head_ref }}
+          commit-msg: ${{ github.event.head_commit.message }}
+
+  # REUSABLE WORKFLOW VULNERABILITIES
+  reusable-workflow-vulnerabilities:
+    uses: ./.github/workflows/reusable.yml
+    with:
+      issue_title: ${{ github.event.issue.title }}
+      user_data: ${{ github.actor }}
+      branch_ref: ${{ github.head_ref }}
+    secrets:
+      api_token: ${{ secrets.API_TOKEN }}  # Safe - secrets context
