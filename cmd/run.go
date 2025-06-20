@@ -166,22 +166,19 @@ func runAudit(cmd *cobra.Command, args []string) {
 		reg := types.NewRegistry()
 		reg.AddAll(allFindings)
 
-		// Show filter info if severity filter is applied
-		if severityLevel != "" {
-			filteredCount := 0
-			filteredFindings := filterFindingsBySeverity(allFindings, minSeverity)
-			for _, findings := range filteredFindings {
-				filteredCount += len(findings)
-			}
-
-			totalCount := 0
-			for _, findings := range allFindings {
-				totalCount += len(findings)
-			}
-
-			fmt.Printf("📊 Showing %d findings with severity %s and above (out of %d total findings)\n",
-				filteredCount, strings.ToUpper(string(minSeverity)), totalCount)
+		filteredCount := 0
+		filteredFindings := filterFindingsBySeverity(allFindings, minSeverity)
+		for _, findings := range filteredFindings {
+			filteredCount += len(findings)
 		}
+
+		totalCount := 0
+		for _, findings := range allFindings {
+			totalCount += len(findings)
+		}
+
+		fmt.Printf("📊 Showing %d findings with severity %s and above (out of %d total findings)\n",
+			filteredCount, strings.ToUpper(string(minSeverity)), totalCount)
 
 		reg.PrintSummary()
 
@@ -202,5 +199,5 @@ func init() {
 
 	runCmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "Quiet mode - suppress banner and success messages")
 	runCmd.Flags().BoolVar(&fix, "fix", false, "Automatically fix issues where possible (not yet implemented)")
-	runCmd.Flags().StringVarP(&severityLevel, "severity", "s", "", "Filter findings by minimum severity level (info, low, medium, high, critical)")
+	runCmd.Flags().StringVarP(&severityLevel, "severity", "s", "info", "Filter findings by minimum severity level (info, low, medium, high, critical)")
 }
