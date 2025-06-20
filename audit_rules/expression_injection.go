@@ -506,6 +506,113 @@ func (r *ExpressionInjectionRule) isInRunContext(path []string) bool {
 	return false
 }
 
+// isInVulnerableContext checks if the current path is within a context that can be vulnerable to expression injection
+func (r *ExpressionInjectionRule) isInVulnerableContext(path []string) bool {
+	if len(path) == 0 {
+		return false
+	}
+
+	// Get the last element in the path (the field name)
+	fieldName := path[len(path)-1]
+
+	// High-risk contexts (direct command execution or path manipulation)
+	highRiskFields := []string{
+		"run",               // Shell command execution
+		"shell",             // Shell selection
+		"entrypoint",        // Docker entrypoint
+		"pre-entrypoint",    // Docker pre-entrypoint
+		"post-entrypoint",   // Docker post-entrypoint
+		"working-directory", // Working directory path
+	}
+
+	for _, field := range highRiskFields {
+		if fieldName == field {
+			return true
+		}
+	}
+
+	// Medium-risk contexts (logic control and action inputs)
+	mediumRiskFields := []string{
+		"if", // Conditional logic
+	}
+
+	for _, field := range mediumRiskFields {
+		if fieldName == field {
+			return true
+		}
+	}
+
+	// Check for 'with' context (action inputs) - needs parent context check
+	if fieldName == "with" || r.isWithinWithContext(path) {
+		return true
+	}
+
+	// Check for 'args' in Docker context
+	if fieldName == "args" && r.isDockerContext(path) {
+		return true
+	}
+
+	return false
+}
+
+// isWithinWithContext checks if we're within a 'with' block (action inputs)
+func (r *ExpressionInjectionRule) isWithinWithContext(path []string) bool {
+	for i := len(path) - 1; i >= 0; i-- {
+		if path[i] == "with" {
+			return true
+		}
+	}
+	return false
+}
+
+// isDockerContext checks if we're in a Docker action context
+func (r *ExpressionInjectionRule) isDockerContext(path []string) bool {
+	for i := len(path) - 1; i >= 0; i-- {
+		if path[i] == "runs" {
+			// Look for Docker-specific fields in the path
+			for j := i; j < len(path); j++ {
+				if path[j] == "image" || path[j] == "entrypoint" {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// getContextRiskLevel determines the risk level based on the field context
+func (r *ExpressionInjectionRule) getContextRiskLevel(path []string) string {
+	if len(path) == 0 {
+		return "unknown"
+	}
+
+	fieldName := path[len(path)-1]
+
+	// High-risk contexts
+	highRiskFields := []string{"run", "shell", "entrypoint", "pre-entrypoint", "post-entrypoint", "working-directory"}
+	for _, field := range highRiskFields {
+		if fieldName == field {
+			return "command-execution"
+		}
+	}
+
+	// Docker args context
+	if fieldName == "args" && r.isDockerContext(path) {
+		return "command-execution"
+	}
+
+	// Medium-risk contexts
+	if fieldName == "if" {
+		return "logic-control"
+	}
+
+	if fieldName == "with" || r.isWithinWithContext(path) {
+		return "action-input"
+	}
+
+	return "unknown"
+}
+
 // VisitNode implements types.NodeVisitor for expression injection
 func (d *ExpressionInjectionDetector) VisitNode(node ast.Node, path []string, filePath string, findings *[]*types.Finding) {
 	if node == nil {
@@ -519,15 +626,31 @@ func (d *ExpressionInjectionDetector) VisitNode(node ast.Node, path []string, fi
 		rule = NewExpressionInjectionRule()
 	}
 
-	// Only interested in string nodes in a run context
+	// Check string nodes in vulnerable contexts (expanded beyond just run blocks)
 	switch n := node.(type) {
 	case *ast.StringNode:
-		if strings.Contains(n.Value, "${{") && rule.isInRunContext(path) {
+		if strings.Contains(n.Value, "${{") && rule.isInVulnerableContext(path) {
 			rule.addExpressionInjectionFinding(n, path, filePath, findings)
 		}
 	case *ast.LiteralNode:
-		if strings.Contains(n.String(), "${{") && rule.isInRunContext(path) {
+		if strings.Contains(n.String(), "${{") && rule.isInVulnerableContext(path) {
 			rule.addExpressionInjectionFinding(n, path, filePath, findings)
+		}
+	case *ast.SequenceNode:
+		// Handle arrays (like Docker args)
+		if rule.isInVulnerableContext(path) {
+			for _, item := range n.Values {
+				switch itemNode := item.(type) {
+				case *ast.StringNode:
+					if strings.Contains(itemNode.Value, "${{") {
+						rule.addExpressionInjectionFinding(itemNode, path, filePath, findings)
+					}
+				case *ast.LiteralNode:
+					if strings.Contains(itemNode.String(), "${{") {
+						rule.addExpressionInjectionFinding(itemNode, path, filePath, findings)
+					}
+				}
+			}
 		}
 	}
 }
@@ -548,6 +671,10 @@ func (r *ExpressionInjectionRule) addExpressionInjectionFinding(node ast.Node, p
 	// Extract and analyze all expressions in the value
 	expressions := r.extractExpressions(value)
 
+	// Get the context risk level for better messaging
+	contextRisk := r.getContextRiskLevel(path)
+	contextField := path[len(path)-1]
+
 	for _, expr := range expressions {
 		// Analyze the expression context
 		exprCtx := r.analyzeExpressionContext(expr)
@@ -556,13 +683,29 @@ func (r *ExpressionInjectionRule) addExpressionInjectionFinding(node ast.Node, p
 			continue
 		}
 
+		// Create context-specific message
+		var message string
+		switch contextRisk {
+		case "command-execution":
+			message = fmt.Sprintf("Potentially unsafe expression in %s field: %s (capability: %s) - risk of command injection",
+				contextField, exprCtx.Context, r.capabilityString(exprCtx.Capability))
+		case "logic-control":
+			message = fmt.Sprintf("Potentially unsafe expression in %s field: %s (capability: %s) - risk of workflow logic manipulation",
+				contextField, exprCtx.Context, r.capabilityString(exprCtx.Capability))
+		case "action-input":
+			message = fmt.Sprintf("Potentially unsafe expression in %s field: %s (capability: %s) - risk depends on action implementation",
+				contextField, exprCtx.Context, r.capabilityString(exprCtx.Capability))
+		default:
+			message = fmt.Sprintf("Potentially unsafe expression in %s field: %s (capability: %s)",
+				contextField, exprCtx.Context, r.capabilityString(exprCtx.Capability))
+		}
+
 		// Create rule for this finding with context-specific severity
 		findingRule := &types.Rule{
 			Category: CategoryExpressionInjection,
 			Severity: exprCtx.Severity,
-			Message: fmt.Sprintf("Potentially unsafe expression in run block: %s (capability: %s)",
-				exprCtx.Context, r.capabilityString(exprCtx.Capability)),
-			Type: types.RuleTypeAST,
+			Message:  message,
+			Type:     types.RuleTypeAST,
 		}
 
 		// Use unified finding creation
@@ -616,24 +759,49 @@ func (r *ExpressionInjectionRule) DetectExpressionsInFile(filePath string) error
 
 // detectExpressionsInDocument detects expressions in a single document
 func (r *ExpressionInjectionRule) detectExpressionsInDocument(doc ast.Node, filePath string) {
-	// Find all run blocks with expressions
-	runBlocks := r.findRunBlocksWithExpressions(doc)
+	// Find all vulnerable blocks with expressions (run, shell, if, etc.)
+	vulnerableBlocks := r.findVulnerableBlocksWithExpressions(doc)
 
-	// Process each run block
-	for _, runBlock := range runBlocks {
-		r.RunBlock = runBlock
-		r.Expressions = runBlock.Expressions
+	// Process each vulnerable block
+	for _, block := range vulnerableBlocks {
+		r.RunBlock = block
+		r.Expressions = block.Expressions
 
-		// Create findings for this run block
-		r.createFindingsForRunBlock(runBlock, filePath)
+		// Create findings for this block
+		r.createFindingsForRunBlock(block, filePath)
 	}
 }
 
-// findRunBlocksWithExpressions finds all run blocks containing expressions
+// findVulnerableBlocksWithExpressions finds all vulnerable blocks containing expressions
+func (r *ExpressionInjectionRule) findVulnerableBlocksWithExpressions(node ast.Node) []*RunBlockInfo {
+	var vulnerableBlocks []*RunBlockInfo
+	r.traverseForVulnerableBlocks(node, []string{}, &vulnerableBlocks)
+	return vulnerableBlocks
+}
+
+// findRunBlocksWithExpressions finds all run blocks containing expressions (kept for compatibility)
 func (r *ExpressionInjectionRule) findRunBlocksWithExpressions(node ast.Node) []*RunBlockInfo {
 	var runBlocks []*RunBlockInfo
 	r.traverseForRunBlocks(node, []string{}, &runBlocks)
 	return runBlocks
+}
+
+// traverseForVulnerableBlocks recursively traverses the AST to find vulnerable blocks
+func (r *ExpressionInjectionRule) traverseForVulnerableBlocks(node ast.Node, path []string, blocks *[]*RunBlockInfo) {
+	if node == nil {
+		return
+	}
+
+	switch n := node.(type) {
+	case *ast.MappingNode:
+		r.traverseMappingForVulnerableBlocks(n, path, blocks)
+	case *ast.SequenceNode:
+		r.traverseSequenceForVulnerableBlocks(n, path, blocks)
+	case *ast.DocumentNode:
+		if n.Body != nil {
+			r.traverseForVulnerableBlocks(n.Body, path, blocks)
+		}
+	}
 }
 
 // traverseForRunBlocks recursively traverses the AST to find run blocks
@@ -651,6 +819,30 @@ func (r *ExpressionInjectionRule) traverseForRunBlocks(node ast.Node, path []str
 		if n.Body != nil {
 			r.traverseForRunBlocks(n.Body, path, runBlocks)
 		}
+	}
+}
+
+// traverseMappingForVulnerableBlocks processes mapping nodes to find vulnerable blocks
+func (r *ExpressionInjectionRule) traverseMappingForVulnerableBlocks(node *ast.MappingNode, path []string, blocks *[]*RunBlockInfo) {
+	for i := 0; i < len(node.Values); i++ {
+		key := node.Values[i].Key
+		value := node.Values[i].Value
+
+		if key == nil || value == nil {
+			continue
+		}
+
+		currentPath := append(path, key.String())
+
+		// Check if this is a vulnerable field
+		if r.isInVulnerableContext(currentPath) {
+			if blockInfo := r.extractVulnerableBlockInfo(value, currentPath); blockInfo != nil {
+				*blocks = append(*blocks, blockInfo)
+			}
+		}
+
+		// Recursively traverse child nodes
+		r.traverseForVulnerableBlocks(value, currentPath, blocks)
 	}
 }
 
@@ -678,11 +870,57 @@ func (r *ExpressionInjectionRule) traverseMappingForRunBlocks(node *ast.MappingN
 	}
 }
 
+// traverseSequenceForVulnerableBlocks processes sequence nodes for vulnerable blocks
+func (r *ExpressionInjectionRule) traverseSequenceForVulnerableBlocks(node *ast.SequenceNode, path []string, blocks *[]*RunBlockInfo) {
+	for i, value := range node.Values {
+		currentPath := append(path, fmt.Sprintf("%d", i))
+		r.traverseForVulnerableBlocks(value, currentPath, blocks)
+	}
+}
+
 // traverseSequenceForRunBlocks processes sequence nodes
 func (r *ExpressionInjectionRule) traverseSequenceForRunBlocks(node *ast.SequenceNode, path []string, runBlocks *[]*RunBlockInfo) {
 	for i, value := range node.Values {
 		currentPath := append(path, fmt.Sprintf("%d", i))
 		r.traverseForRunBlocks(value, currentPath, runBlocks)
+	}
+}
+
+// extractVulnerableBlockInfo extracts information from a vulnerable block node
+func (r *ExpressionInjectionRule) extractVulnerableBlockInfo(node ast.Node, path []string) *RunBlockInfo {
+	var value string
+	var line, column int
+
+	switch n := node.(type) {
+	case *ast.StringNode:
+		value = n.Value
+		line = n.GetToken().Position.Line
+		column = n.GetToken().Position.Column
+	case *ast.LiteralNode:
+		value = n.String()
+		line = n.GetToken().Position.Line
+		column = n.GetToken().Position.Column
+	default:
+		return nil
+	}
+
+	// Check if this block contains expressions
+	if !strings.Contains(value, "${{") {
+		return nil
+	}
+
+	expressions := r.extractExpressions(value)
+	if len(expressions) == 0 {
+		return nil
+	}
+
+	return &RunBlockInfo{
+		Node:        node,
+		Path:        path,
+		Line:        line,
+		Column:      column,
+		Value:       value,
+		Expressions: expressions,
 	}
 }
 
@@ -726,6 +964,10 @@ func (r *ExpressionInjectionRule) extractRunBlockInfo(node ast.Node, path []stri
 
 // createFindingsForRunBlock creates findings for a specific run block with context analysis
 func (r *ExpressionInjectionRule) createFindingsForRunBlock(runBlock *RunBlockInfo, filePath string) {
+	// Get the context risk level for better messaging
+	contextRisk := r.getContextRiskLevel(runBlock.Path)
+	contextField := runBlock.Path[len(runBlock.Path)-1]
+
 	// Create a finding for each expression with context analysis
 	for _, expr := range runBlock.Expressions {
 		// Analyze the expression context
@@ -735,12 +977,28 @@ func (r *ExpressionInjectionRule) createFindingsForRunBlock(runBlock *RunBlockIn
 			continue
 		}
 
+		// Create context-specific message
+		var message string
+		switch contextRisk {
+		case "command-execution":
+			message = fmt.Sprintf("Potentially unsafe expression in %s field: %s (capability: %s) - risk of command injection",
+				contextField, exprCtx.Context, r.capabilityString(exprCtx.Capability))
+		case "logic-control":
+			message = fmt.Sprintf("Potentially unsafe expression in %s field: %s (capability: %s) - risk of workflow logic manipulation",
+				contextField, exprCtx.Context, r.capabilityString(exprCtx.Capability))
+		case "action-input":
+			message = fmt.Sprintf("Potentially unsafe expression in %s field: %s (capability: %s) - risk depends on action implementation",
+				contextField, exprCtx.Context, r.capabilityString(exprCtx.Capability))
+		default:
+			message = fmt.Sprintf("Potentially unsafe expression in %s field: %s (capability: %s)",
+				contextField, exprCtx.Context, r.capabilityString(exprCtx.Capability))
+		}
+
 		rule := &types.Rule{
 			Category: CategoryExpressionInjection,
 			Severity: exprCtx.Severity,
-			Message: fmt.Sprintf("Potentially unsafe expression in run block: %s (capability: %s)",
-				exprCtx.Context, r.capabilityString(exprCtx.Capability)),
-			Type: types.RuleTypeAST,
+			Message:  message,
+			Type:     types.RuleTypeAST,
 		}
 
 		finding := types.NewFindingFromAST(
@@ -958,9 +1216,23 @@ func GetExpressionInjectionRules() types.RuleSet {
 			},
 			{
 				Category: CategoryExpressionInjection,
-				Pattern:  `(?m)^\s*run:\s*.*\$\{\{\s*(inputs\.[\w\.]+|github\.event\.[\w\.]+|vars\.[\w\.]+)\s*\}\}`,
+				Pattern:  `(?m)^\s*(run|shell|entrypoint|working-directory):\s*.*\$\{\{\s*(inputs\.[\w\.]+|github\.event\.[\w\.]+|vars\.[\w\.]+)\s*\}\}`,
 				Severity: types.SeverityHigh,
-				Message:  "Untrusted input expression in shell commands - potential command injection",
+				Message:  "Untrusted input expression in command execution context - potential injection vulnerability",
+				Type:     types.RuleTypePattern,
+			},
+			{
+				Category: CategoryExpressionInjection,
+				Pattern:  `(?m)^\s*if:\s*.*\$\{\{\s*(inputs\.[\w\.]+|github\.event\.[\w\.]+|github\.actor)\s*\}\}`,
+				Severity: types.SeverityMedium,
+				Message:  "Untrusted input expression in conditional logic - potential workflow manipulation",
+				Type:     types.RuleTypePattern,
+			},
+			{
+				Category: CategoryExpressionInjection,
+				Pattern:  `(?m)^\s*with:\s*\n.*\$\{\{\s*(inputs\.[\w\.]+|github\.event\.[\w\.]+|github\.actor)\s*\}\}`,
+				Severity: types.SeverityMedium,
+				Message:  "Untrusted input expression in action inputs - security risk depends on action implementation",
 				Type:     types.RuleTypePattern,
 			},
 		},
