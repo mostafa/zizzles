@@ -24,3 +24,18 @@ build-debug:
 .PHONY: test
 test:
 	@go test ./... -v
+
+.PHONY: run
+run:
+	@make build-debug
+	@./zizzles $(ARGS)
+
+# Helper target to show usage
+.PHONY: run-help
+run-help:
+	@echo "Usage: make run ARGS='command [options] [files...]'"
+	@echo "Examples:"
+	@echo "  make run ARGS='run example.yml'"
+	@echo "  make run ARGS='run --severity high example.yml'"
+	@echo "  make run ARGS='doc expression-injection'"
+	@echo "  make run ARGS='--help'"
