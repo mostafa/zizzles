@@ -10,12 +10,16 @@ update-schema:
 	@echo "Done"
 
 .PHONY: build-release
+build-release-doc:
+	@go build -o zizzles -tags doc -trimpath -ldflags "-s -w" main.go
+
+.PHONY: build-release
 build-release:
 	@go build -o zizzles -trimpath -ldflags "-s -w" main.go
 
 .PHONY: build-debug
 build-debug:
-	@go build -o zizzles main.go
+	@go build -o zizzles -tags doc main.go
 
 .PHONY: test
 test:
