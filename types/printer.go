@@ -86,64 +86,27 @@ func (p *Printer) printFindingWithContext(finding *Finding) {
 	location.WriteString(fmt.Sprintf(":%d:%d", finding.Line, finding.ActualColumn))
 	fmt.Println(location.String())
 
+	// Extract the specific expression from the finding message
+	specificExpression := p.extractExpressionFromMessage(finding.Rule.Message)
+
 	fileLines := strings.Split(string(p.content), "\n")
 	start := finding.Line - 3
 	start = max(0, start)
 	end := finding.Line
 
+	// Extend context for multiline blocks
 	if end < len(fileLines) && (strings.Contains(fileLines[end-1], "run: |") || strings.Contains(fileLines[end-1], "run: >")) {
 		end = min(end+5, len(fileLines))
 	}
 	end = min(end, len(fileLines))
+
 	var context strings.Builder
 	for i, line := range fileLines[start:end] {
 		ln := start + i + 1
 
-		if ln == finding.Line {
-			if strings.Contains(line, "run: |") || strings.Contains(line, "run: >") {
-				// Expression is on subsequent lines for multiline blocks
-			} else {
-				if strings.Contains(line, "${{") {
-					exprRe := regexp.MustCompile(`\$\{\{[^}]+\}\}`)
-					matches := exprRe.FindAllStringIndex(line, -1)
-					for _, match := range matches {
-						matchStart := match[0] + 1
-						if matchStart <= finding.ActualColumn && finding.ActualColumn <= matchStart+len(line[match[0]:match[1]]) {
-							before := line[:match[0]]
-							after := line[match[1]:]
-							matchedExpr := line[match[0]:match[1]]
-
-							var lineBuilder strings.Builder
-							lineBuilder.WriteString(before)
-							lineBuilder.WriteString(severityStyle.Render(matchedExpr))
-							lineBuilder.WriteString(after)
-							line = lineBuilder.String()
-							break
-						}
-					}
-				}
-			}
-		} else if ln > finding.Line && finding.MatchedLength > 0 {
-			if strings.Contains(line, "${{") {
-				exprRe := regexp.MustCompile(`\$\{\{[^}]+\}\}`)
-				matches := exprRe.FindAllStringIndex(line, -1)
-
-				for _, match := range matches {
-					matchStart := match[0] + 1
-					if matchStart <= finding.ActualColumn && finding.ActualColumn <= matchStart+len(line[match[0]:match[1]]) {
-						before := line[:match[0]]
-						after := line[match[1]:]
-						matchedExpr := line[match[0]:match[1]]
-
-						var lineBuilder strings.Builder
-						lineBuilder.WriteString(before)
-						lineBuilder.WriteString(severityStyle.Render(matchedExpr))
-						lineBuilder.WriteString(after)
-						line = lineBuilder.String()
-						break
-					}
-				}
-			}
+		// Highlight only the specific expression in this line
+		if strings.Contains(line, "${{") && specificExpression != "" {
+			line = p.highlightSpecificExpression(line, specificExpression, severityStyle)
 		}
 
 		context.WriteString(lineNumberStyle.Render(""))
@@ -155,4 +118,34 @@ func (p *Printer) printFindingWithContext(finding *Finding) {
 	}
 	fmt.Print(context.String())
 	fmt.Println()
+}
+
+// extractExpressionFromMessage extracts the specific expression from the finding message
+func (p *Printer) extractExpressionFromMessage(message string) string {
+	// Pattern to match "field: expression (capability:"
+	re := regexp.MustCompile(`field: ([^(]+) \(capability:`)
+	matches := re.FindStringSubmatch(message)
+	if len(matches) > 1 {
+		return strings.TrimSpace(matches[1])
+	}
+	return ""
+}
+
+// highlightSpecificExpression highlights only the specific expression in the line
+func (p *Printer) highlightSpecificExpression(line, targetExpression string, style lipgloss.Style) string {
+	// Create regex pattern for the specific expression
+	// We need to escape the expression and allow for whitespace variations
+	escapedExpr := regexp.QuoteMeta(targetExpression)
+	exprPattern := fmt.Sprintf(`\$\{\{\s*%s\s*\}\}`, escapedExpr)
+	specificRe := regexp.MustCompile(exprPattern)
+
+	// Find the specific expression match
+	if loc := specificRe.FindStringIndex(line); loc != nil {
+		before := line[:loc[0]]
+		after := line[loc[1]:]
+		matchedExpr := line[loc[0]:loc[1]]
+		return before + style.Render(matchedExpr) + after
+	}
+
+	return line
 }

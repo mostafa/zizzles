@@ -977,6 +977,19 @@ func (r *ExpressionInjectionRule) createFindingsForRunBlock(runBlock *RunBlockIn
 			continue
 		}
 
+		// Find the position of this expression in the value
+		exprPattern := fmt.Sprintf("${{\\s*%s\\s*}}", regexp.QuoteMeta(expr))
+		re := regexp.MustCompile(exprPattern)
+		loc := re.FindStringIndex(runBlock.Value)
+
+		var matchedColumn, matchedLineOffset int
+		if loc != nil {
+			matchedColumn = loc[0]
+			// Calculate line offset within multiline strings
+			contentBeforeMatch := runBlock.Value[:loc[0]]
+			matchedLineOffset = strings.Count(contentBeforeMatch, "\n")
+		}
+
 		// Create context-specific message
 		var message string
 		switch contextRisk {
@@ -1006,8 +1019,8 @@ func (r *ExpressionInjectionRule) createFindingsForRunBlock(runBlock *RunBlockIn
 			filePath,
 			runBlock.Node,
 			runBlock.Path,
-			runBlock.Column,
-			runBlock.Line,
+			matchedColumn,
+			matchedLineOffset,
 			len(exprCtx.Raw),
 		)
 
