@@ -100,6 +100,141 @@ func filterFindingsBySeverity(findings map[types.Category][]*types.Finding, minS
 	return filtered
 }
 
+// countFindingsBySeverity counts findings by severity level
+func countFindingsBySeverity(findings map[types.Category][]*types.Finding) map[types.Severity]int {
+	counts := map[types.Severity]int{
+		types.SeverityCritical: 0,
+		types.SeverityHigh:     0,
+		types.SeverityMedium:   0,
+		types.SeverityLow:      0,
+		types.SeverityInfo:     0,
+	}
+
+	for _, categoryFindings := range findings {
+		for _, finding := range categoryFindings {
+			counts[finding.Severity]++
+		}
+	}
+
+	return counts
+}
+
+// printFileSummary prints a summary of findings for a single file
+func printFileSummary(filename string, findings map[types.Category][]*types.Finding, displayFindings map[types.Category][]*types.Finding, minSeverity types.Severity) {
+	if len(findings) == 0 {
+		fmt.Printf("📝 %s: No security issues found\n", filename)
+		return
+	}
+
+	totalCount := 0
+	for _, fs := range findings {
+		totalCount += len(fs)
+	}
+
+	filteredCount := 0
+	for _, fs := range displayFindings {
+		filteredCount += len(fs)
+	}
+
+	counts := countFindingsBySeverity(findings)
+
+	// Color coding for severity counts
+	colorNum := func(num int, color string) string {
+		if num == 0 {
+			return fmt.Sprintf("\033[90m%d\033[0m", num) // Gray for zero
+		}
+		return fmt.Sprintf("%s%d\033[0m", color, num)
+	}
+
+	fmt.Printf("📝 %s: %d finding%s (%s critical, %s high, %s medium, %s low, %s info)",
+		filename,
+		totalCount,
+		func() string {
+			if totalCount == 1 {
+				return ""
+			}
+			return "s"
+		}(),
+		colorNum(counts[types.SeverityCritical], "\033[1;31m"), // Bold red
+		colorNum(counts[types.SeverityHigh], "\033[31m"),       // Red
+		colorNum(counts[types.SeverityMedium], "\033[33m"),     // Yellow
+		colorNum(counts[types.SeverityLow], "\033[32m"),        // Green
+		colorNum(counts[types.SeverityInfo], "\033[32m"),       // Green
+	)
+
+	if minSeverity != "" && filteredCount != totalCount {
+		fmt.Printf(" - showing %d", filteredCount)
+	}
+	fmt.Println()
+}
+
+// printOverallSummary prints an enhanced overall summary
+func printOverallSummary(allFindings map[types.Category][]*types.Finding, minSeverity types.Severity, fileCount int) {
+	totalCount := 0
+	for _, fs := range allFindings {
+		totalCount += len(fs)
+	}
+
+	counts := countFindingsBySeverity(allFindings)
+
+	fmt.Println("\n" + strings.Repeat("=", 60))
+	fmt.Printf("📊 OVERALL SUMMARY\n")
+	fmt.Printf("Files scanned: %d\n", fileCount)
+	fmt.Printf("Total findings: %d\n", totalCount)
+
+	if totalCount > 0 {
+		fmt.Println("\nFindings by severity:")
+
+		severities := []struct {
+			severity types.Severity
+			name     string
+			emoji    string
+			color    string
+		}{
+			{types.SeverityCritical, "Critical", "🚨", "\033[1;31m"},
+			{types.SeverityHigh, "High", "🔴", "\033[31m"},
+			{types.SeverityMedium, "Medium", "🟡", "\033[33m"},
+			{types.SeverityLow, "Low", "🟢", "\033[32m"},
+			{types.SeverityInfo, "Info", "ℹ️", "\033[32m"},
+		}
+
+		for _, sev := range severities {
+			count := counts[sev.severity]
+			if count > 0 {
+				fmt.Printf("  %s %s%s: %d finding%s\033[0m\n",
+					sev.emoji,
+					sev.color,
+					sev.name,
+					count,
+					func() string {
+						if count == 1 {
+							return ""
+						}
+						return "s"
+					}(),
+				)
+			}
+		}
+
+		fmt.Println("\nFindings by category:")
+		for category, categoryFindings := range allFindings {
+			if len(categoryFindings) > 0 {
+				fmt.Printf("  📋 %s: %d finding%s\n",
+					category,
+					len(categoryFindings),
+					func() string {
+						if len(categoryFindings) == 1 {
+							return ""
+						}
+						return "s"
+					}(),
+				)
+			}
+		}
+	}
+	fmt.Println(strings.Repeat("=", 60))
+}
+
 func runAudit(cmd *cobra.Command, args []string) {
 	files := args
 
@@ -119,6 +254,7 @@ func runAudit(cmd *cobra.Command, args []string) {
 
 	executor := audit_rules.CreateRuleExecutor()
 	allFindings := make(map[types.Category][]*types.Finding)
+	processedFiles := 0
 
 	origLen := len(files)
 
@@ -157,27 +293,35 @@ func runAudit(cmd *cobra.Command, args []string) {
 			continue
 		}
 
-		if len(findings) > 0 {
-			// Filter findings for display based on severity
-			displayFindings := filterFindingsBySeverity(findings, minSeverity)
+		processedFiles++
 
-			// Only print if there are findings to display after filtering
-			if len(displayFindings) > 0 {
-				printer := types.NewPrinter(content, file, quiet)
-				printer.PrintFindings(displayFindings)
-			}
+		// Filter findings for display based on severity
+		displayFindings := filterFindingsBySeverity(findings, minSeverity)
 
-			// Add ALL findings (not filtered) to the global map for accurate counting
-			for cat, fs := range findings {
-				allFindings[cat] = append(allFindings[cat], fs...)
-			}
+		// Print findings if there are any to display
+		if len(displayFindings) > 0 {
+			printer := types.NewPrinter(content, file, quiet)
+			printer.PrintFindings(displayFindings)
+		}
+
+		// Print per-file summary
+		printFileSummary(file, findings, displayFindings, minSeverity)
+
+		// Add ALL findings (not filtered) to the global map for accurate counting
+		for cat, fs := range findings {
+			allFindings[cat] = append(allFindings[cat], fs...)
+		}
+
+		// Add spacing between files if not the last file and there are findings
+		if len(findings) > 0 && file != files[len(files)-1] {
+			fmt.Println()
 		}
 	}
 
-	if len(allFindings) > 0 {
-		reg := types.NewRegistry()
-		reg.AddAll(allFindings)
+	// Print overall summary
+	printOverallSummary(allFindings, minSeverity, processedFiles)
 
+	if len(allFindings) > 0 {
 		filteredCount := 0
 		filteredFindings := filterFindingsBySeverity(allFindings, minSeverity)
 		for _, findings := range filteredFindings {
@@ -213,6 +357,8 @@ func runAudit(cmd *cobra.Command, args []string) {
 			fmt.Printf("\n📊 Found %d total findings\n", totalCount)
 		}
 
+		reg := types.NewRegistry()
+		reg.AddAll(allFindings)
 		reg.PrintSummary()
 
 		if fix {
