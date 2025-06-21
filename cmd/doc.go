@@ -179,6 +179,7 @@ func (m menuModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.list.SetWidth(msg.Width)
+		m.list.SetHeight(msg.Height - 2) // Leave some space for margins
 		return m, nil
 
 	case tea.KeyMsg:
@@ -317,9 +318,9 @@ func createMenuModel() menuModel {
 	}
 
 	const defaultWidth = 20
-	const listHeight = 14
+	const defaultHeight = 24 // Increased default height
 
-	l := list.New(items, list.NewDefaultDelegate(), defaultWidth, listHeight)
+	l := list.New(items, list.NewDefaultDelegate(), defaultWidth, defaultHeight)
 	l.Title = "Zizzles Documentation"
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false)
