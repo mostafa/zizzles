@@ -37,7 +37,7 @@ func ApplyYAMLPatches(content string, patches []Patch) (string, error) {
 	// Apply each patch
 	for _, patch := range patches {
 		// Find the node at the path
-		nodeInfo, err := findNodeByPath(file, patch.Path, content)
+		nodeInfo, err := findNodeByPath(file, patch.Path)
 		if err != nil {
 			return "", fmt.Errorf("YAML patch error at %s: %w", patch.Path, err)
 		}
@@ -78,7 +78,7 @@ func ApplyYAMLPatches(content string, patches []Patch) (string, error) {
 }
 
 // findNodeByPath finds a node by its dot-separated path
-func findNodeByPath(file *ast.File, path string, content string) (*NodeInfo, error) {
+func findNodeByPath(file *ast.File, path string) (*NodeInfo, error) {
 	if path == "" || path == "." {
 		// Root document
 		if len(file.Docs) == 0 {

@@ -435,7 +435,7 @@ func TestDebugFlowMapping(t *testing.T) {
 		t.Fatalf("failed to parse YAML: %v", err)
 	}
 
-	nodeInfo, err := findNodeByPath(file, "jobs.test.env", content)
+	nodeInfo, err := findNodeByPath(file, "jobs.test.env")
 	if err != nil {
 		t.Fatalf("failed to find node: %v", err)
 	}

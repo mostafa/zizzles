@@ -585,7 +585,7 @@ func findNodeByPathFromContent(content string, path string) (*NodeInfo, error) {
 	}
 
 	// Use the existing findNodeByPath function
-	return findNodeByPath(file, path, content)
+	return findNodeByPath(file, path)
 }
 
 // applyFlowSequenceElementReplace replaces an element in a flow sequence with proper comma formatting
