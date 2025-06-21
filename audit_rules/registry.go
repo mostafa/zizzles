@@ -6,6 +6,7 @@ var registry = make(map[types.Category]types.RuleSet)
 
 func init() {
 	registry[CategoryExpressionInjection] = GetExpressionInjectionRules()
+	registry[CategoryOutputHandling] = GetOutputHandlingRules()
 }
 
 // GetRuleSet returns a rule set by category
@@ -54,6 +55,14 @@ func GetASTRules() []*types.ASTRule {
 		Visitor:  expressionRule.detector,
 	})
 
+	outputHandlingRule := NewOutputHandlingRule()
+	astRules = append(astRules, &types.ASTRule{
+		Category: CategoryOutputHandling,
+		Severity: types.SeverityMedium,
+		Message:  "Output handling security issue detected",
+		Visitor:  outputHandlingRule.detector,
+	})
+
 	return astRules
 }
 
@@ -63,6 +72,16 @@ func GetPatternRules() []*types.PatternRule {
 
 	expressionRules := GetExpressionInjectionRules()
 	for _, rule := range expressionRules.Rules {
+		patternRules = append(patternRules, &types.PatternRule{
+			Category: rule.Category,
+			Pattern:  rule.Pattern,
+			Severity: rule.Severity,
+			Message:  rule.Message,
+		})
+	}
+
+	outputHandlingRules := GetOutputHandlingRules()
+	for _, rule := range outputHandlingRules.Rules {
 		patternRules = append(patternRules, &types.PatternRule{
 			Category: rule.Category,
 			Pattern:  rule.Pattern,
@@ -92,4 +111,9 @@ func CreateRuleExecutor() *types.RuleExecutor {
 // GetExpressionInjectionRuleInstance returns a new instance of the expression injection rule
 func GetExpressionInjectionRuleInstance() *ExpressionInjectionRule {
 	return NewExpressionInjectionRule()
+}
+
+// GetOutputHandlingRuleInstance returns a new instance of the output handling rule
+func GetOutputHandlingRuleInstance() *OutputHandlingRule {
+	return NewOutputHandlingRule()
 }

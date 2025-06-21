@@ -1,0 +1,99 @@
+name: "Output Handling Issues Example"
+description: "Example demonstrating various output handling security issues"
+
+# This action demonstrates PROBLEMATIC patterns that the output handling audit rules will detect
+
+inputs:
+  user_input:
+    description: "User-provided input"
+    required: true
+  api_key:
+    description: "API key for external service"
+    required: true
+
+outputs:
+  # ISSUE: Missing description
+  basic_result:
+    value: ${{ steps.compute.outputs.result }}
+  
+  # ISSUE: Vague description  
+  string_output:
+    description: "string"
+    value: ${{ steps.process.outputs.data }}
+  
+  # ISSUE: Direct secret exposure
+  exposed_secret:
+    description: "API key for external service"
+    value: ${{ secrets.API_KEY }}
+  
+  # ISSUE: Direct user input without validation
+  user_title:
+    description: "Issue title from user"
+    value: ${{ github.event.issue.title }}
+  
+  # ISSUE: GitHub token exposure
+  github_token:
+    description: "GitHub token"
+    value: ${{ github.token }}
+
+runs:
+  using: "composite"
+  steps:
+    # ISSUE: Deprecated set-output command
+    - name: Set output old way
+      shell: bash
+      run: |
+        echo "::set-output name=legacy_result::some_value"
+    
+    # ISSUE: Unquoted output usage in shell
+    - name: Use output unsafely
+      shell: bash
+      run: |
+        echo ${{ steps.compute.outputs.result }}
+    
+    # ISSUE: Output with dangerous characters in shell
+    - name: Dangerous shell usage
+      shell: bash  
+      run: |
+        echo "Result: ${{ steps.build.outputs.result }}"; echo "Done"
+    
+    # ISSUE: Direct echo of user input
+    - name: Echo user input directly
+      shell: bash
+      run: |
+        echo ${{ github.event.issue.title }}
+    
+    # ISSUE: Multiple set-output commands
+    - name: Multiple deprecated commands
+      shell: bash
+      run: |
+        echo "::set-output name=first::${{ inputs.user_input }}"
+        echo "::set-output name=second::${{ secrets.API_KEY }}"
+    
+    # ISSUE: Unsafe interpolation with user data
+    - name: Unsafe interpolation
+      shell: bash
+      run: |
+        TITLE=${{ github.event.pull_request.title }}  # Unquoted
+        echo "Processing: $TITLE"
+    
+    - name: Compute result
+      id: compute
+      shell: bash
+      run: |
+        # This is actually OK - using modern approach
+        echo "result=computed_value" >> $GITHUB_OUTPUT
+    
+    - name: Process data
+      id: process
+      shell: bash
+      run: |
+        # This is OK too
+        echo "data=processed_data" >> $GITHUB_OUTPUT
+    
+    - name: Build artifact
+      id: build
+      shell: bash
+      run: |
+        # This is OK
+        echo "result=artifact.zip" >> $GITHUB_OUTPUT 

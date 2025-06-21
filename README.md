@@ -205,6 +205,7 @@ This project is licensed under the terms specified in the [LICENSE](./LICENSE) f
 - [octoscan](https://github.com/synacktiv/octoscan) - A static vulnerability scanner for GitHub action workflows
 - [hadolint](https://github.com/hadolint/hadolint) - A Dockerfile linter
 - [JavaScript](https://github.com/analysis-tools-dev/static-analysis?tab=readme-ov-file#javascript) - A list of JavaScript static analysis tools
+- [gitleaks](https://github.com/gitleaks/gitleaks) - A static analysis tool for GitHub Actions workflows
 
 ---
 

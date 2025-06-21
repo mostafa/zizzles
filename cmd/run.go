@@ -66,7 +66,7 @@ func shouldShowFinding(finding *types.Finding, minSeverity types.Severity) bool 
 		return true // No filter, show all
 	}
 
-	findingSeverityLevel, exists := severityOrder[finding.Rule.Severity]
+	findingSeverityLevel, exists := severityOrder[finding.Severity]
 	if !exists {
 		return true // Unknown severity, show by default
 	}

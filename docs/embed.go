@@ -6,3 +6,6 @@ import _ "embed"
 
 //go:embed audit_rules/expression_injection.md
 var ExpressionInjectionDocs string
+
+//go:embed audit_rules/output_handling.md
+var OutputHandlingDocs string
