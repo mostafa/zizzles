@@ -2,7 +2,6 @@ package yaml_patch
 
 import (
 	"fmt"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -12,7 +11,7 @@ import (
 )
 
 // valueToYAMLString converts a value to a YAML string with proper formatting
-func valueToYAMLString(value interface{}) (string, error) {
+func valueToYAMLString(value any) (string, error) {
 	switch v := value.(type) {
 	case string:
 		return v, nil
@@ -24,11 +23,11 @@ func valueToYAMLString(value interface{}) (string, error) {
 		return strconv.FormatFloat(v, 'f', -1, 64), nil
 	case map[string]string:
 		return serializeMap(v)
-	case map[string]interface{}:
+	case map[string]any:
 		return serializeMap(v)
 	case []string:
 		return serializeSlice(v)
-	case []interface{}:
+	case []any:
 		return serializeSlice(v)
 	default:
 		// Use go-yaml for complex types
@@ -41,7 +40,7 @@ func valueToYAMLString(value interface{}) (string, error) {
 }
 
 // serializeMap serializes a map to YAML string
-func serializeMap(m interface{}) (string, error) {
+func serializeMap(m any) (string, error) {
 	bytes, err := yaml.Marshal(m)
 	if err != nil {
 		return "", err
@@ -50,7 +49,7 @@ func serializeMap(m interface{}) (string, error) {
 }
 
 // serializeSlice serializes a slice to YAML string
-func serializeSlice(s interface{}) (string, error) {
+func serializeSlice(s any) (string, error) {
 	bytes, err := yaml.Marshal(s)
 	if err != nil {
 		return "", err
@@ -58,49 +57,10 @@ func serializeSlice(s interface{}) (string, error) {
 	return strings.TrimSpace(string(bytes)), nil
 }
 
-// parsePath parses a YAML path string into components
-func parsePath(path string) []PathComponent {
-	if path == "" || path == "." {
-		return []PathComponent{}
-	}
-
-	parts := strings.Split(path, ".")
-	components := make([]PathComponent, 0, len(parts))
-
-	for _, part := range parts {
-		if part == "" {
-			continue
-		}
-
-		// Check if this is an array index
-		if strings.HasPrefix(part, "[") && strings.HasSuffix(part, "]") {
-			indexStr := part[1 : len(part)-1]
-			if index, err := strconv.Atoi(indexStr); err == nil {
-				components = append(components, PathComponent{
-					Type:  ArrayIndex,
-					Value: index,
-				})
-			} else {
-				components = append(components, PathComponent{
-					Type:  Key,
-					Value: part,
-				})
-			}
-		} else {
-			components = append(components, PathComponent{
-				Type:  Key,
-				Value: part,
-			})
-		}
-	}
-
-	return components
-}
-
 // PathComponent represents a single component of a YAML path
 type PathComponent struct {
 	Type  PathComponentType
-	Value interface{}
+	Value any
 }
 
 // PathComponentType represents the type of a path component
@@ -143,7 +103,7 @@ func formatBlockMappingAddition(key, value string, indentation int) string {
 	indent := strings.Repeat("  ", indentation/2)
 
 	// Try to parse as YAML mapping
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	err := yamlv3.Unmarshal([]byte(value), &parsed)
 	if err == nil && len(parsed) > 0 {
 		// It's a mapping, format as nested YAML
@@ -271,16 +231,16 @@ func findSequenceItemEnd(nodeInfo *NodeInfo) int {
 }
 
 // isMappingValue checks if a value is a mapping
-func isMappingValue(value interface{}) bool {
+func isMappingValue(value any) bool {
 	switch v := value.(type) {
-	case map[string]string, map[string]interface{}:
+	case map[string]string, map[string]any:
 		return true
 	case string:
 		// Try to parse the string as YAML to see if it's a mapping
-		var parsed interface{}
+		var parsed any
 		if err := yamlv3.Unmarshal([]byte(v), &parsed); err == nil {
 			switch parsed.(type) {
-			case map[string]interface{}:
+			case map[string]any:
 				return true
 			}
 		}
@@ -298,16 +258,16 @@ func isMappingValue(value interface{}) bool {
 }
 
 // mergeMappings merges two mapping values
-func mergeMappings(existing, new interface{}) (interface{}, error) {
+func mergeMappings(existing, new any) (any, error) {
 	// Parse existing value if it's a string
-	var existingMap map[string]interface{}
+	var existingMap map[string]any
 	switch existingVal := existing.(type) {
 	case map[string]string:
-		existingMap = make(map[string]interface{})
+		existingMap = make(map[string]any)
 		for k, v := range existingVal {
 			existingMap[k] = v
 		}
-	case map[string]interface{}:
+	case map[string]any:
 		existingMap = existingVal
 	case string:
 		// Try to parse the string as YAML
@@ -316,7 +276,7 @@ func mergeMappings(existing, new interface{}) (interface{}, error) {
 			if strings.Contains(existingVal, ":") && !strings.Contains(existingVal, "\n") {
 				parts := strings.SplitN(existingVal, ":", 2)
 				if len(parts) == 2 {
-					existingMap = map[string]interface{}{
+					existingMap = map[string]any{
 						strings.TrimSpace(parts[0]): strings.TrimSpace(parts[1]),
 					}
 				}
@@ -325,14 +285,14 @@ func mergeMappings(existing, new interface{}) (interface{}, error) {
 	}
 
 	// Parse new value if it's a string
-	var newMap map[string]interface{}
+	var newMap map[string]any
 	switch newVal := new.(type) {
 	case map[string]string:
-		newMap = make(map[string]interface{})
+		newMap = make(map[string]any)
 		for k, v := range newVal {
 			newMap[k] = v
 		}
-	case map[string]interface{}:
+	case map[string]any:
 		newMap = newVal
 	case string:
 		if err := yamlv3.Unmarshal([]byte(newVal), &newMap); err != nil {
@@ -342,7 +302,7 @@ func mergeMappings(existing, new interface{}) (interface{}, error) {
 
 	// Merge the maps
 	if existingMap != nil && newMap != nil {
-		result := make(map[string]interface{})
+		result := make(map[string]any)
 		for k, v := range existingMap {
 			result[k] = v
 		}
@@ -390,23 +350,12 @@ func extractIndentation(line string) int {
 	return indentation
 }
 
-// toEnvName converts an expression to a safe environment variable name
-func toEnvName(expression string) string {
-	re := regexp.MustCompile(`[^a-zA-Z0-9_]`)
-	name := re.ReplaceAllString(expression, "_")
-	name = strings.ToUpper(name)
-	if len(name) > 0 && !regexp.MustCompile(`^[a-zA-Z]`).MatchString(name) {
-		name = "EXPR_" + name
-	}
-	return name
-}
-
 // formatBlockMappingValue formats a mapping value as a proper block mapping
 func formatBlockMappingValue(value string, indentation int) string {
 	indent := strings.Repeat("  ", indentation)
 
 	// Try to parse the value as YAML to see if it's a mapping
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	if err := yamlv3.Unmarshal([]byte(value), &parsed); err == nil && len(parsed) > 0 {
 		// It's a mapping, format as block mapping
 		result := ""

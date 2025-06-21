@@ -392,6 +392,7 @@ func TestGetExpressionInjectionRuleInstance(t *testing.T) {
 
 	if rule == nil {
 		t.Error("expected non-nil rule instance")
+		return
 	}
 
 	if rule.Category != CategoryExpressionInjection {
@@ -777,7 +778,11 @@ jobs:
 	if err != nil {
 		t.Fatalf("Failed to write test file: %v", err)
 	}
-	defer deleteTestFile(testFile)
+	defer func() {
+		if err := deleteTestFile(testFile); err != nil {
+			t.Fatalf("Failed to delete test file: %v", err)
+		}
+	}()
 
 	// Test detection
 	err = rule.DetectExpressionsInFile(testFile)
@@ -840,7 +845,11 @@ jobs:
 	if err != nil {
 		t.Fatalf("Failed to write test file: %v", err)
 	}
-	defer deleteTestFile(testFile)
+	defer func() {
+		if err := deleteTestFile(testFile); err != nil {
+			t.Fatalf("Failed to delete test file: %v", err)
+		}
+	}()
 
 	// Test fix generation
 	fixedContent, err := rule.FixFile(testFile)
@@ -973,7 +982,11 @@ jobs:
 	if err != nil {
 		t.Fatalf("Failed to write test file: %v", err)
 	}
-	defer deleteTestFile(testFile)
+	defer func() {
+		if err := deleteTestFile(testFile); err != nil {
+			t.Fatalf("Failed to delete test file: %v", err)
+		}
+	}()
 
 	// Test detection
 	err = rule.DetectExpressionsInFile(testFile)
@@ -1050,7 +1063,11 @@ jobs:
 	if err != nil {
 		t.Fatalf("Failed to write test file: %v", err)
 	}
-	defer deleteTestFile(testFile)
+	defer func() {
+		if err := deleteTestFile(testFile); err != nil {
+			t.Fatalf("Failed to delete test file: %v", err)
+		}
+	}()
 
 	// Test detection
 	err = rule.DetectExpressionsInFile(testFile)
@@ -1182,7 +1199,11 @@ func TestExpressionInjectionRule_ContextRiskLevels(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to write test file: %v", err)
 			}
-			defer deleteTestFile(testFile)
+			defer func() {
+				if err := deleteTestFile(testFile); err != nil {
+					t.Fatalf("Failed to delete test file: %v", err)
+				}
+			}()
 
 			// Clear previous findings
 			rule.Findings = make([]*types.Finding, 0)
@@ -1266,7 +1287,11 @@ jobs:
 	if err != nil {
 		b.Fatalf("Failed to write test file: %v", err)
 	}
-	defer deleteTestFile(testFile)
+	defer func() {
+		if err := deleteTestFile(testFile); err != nil {
+			b.Fatalf("Failed to delete test file: %v", err)
+		}
+	}()
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

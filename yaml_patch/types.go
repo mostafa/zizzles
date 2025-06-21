@@ -90,7 +90,7 @@ func (op RewriteFragmentOp) Type() string { return "RewriteFragment" }
 
 // ReplaceOp replaces the value at the given path
 type ReplaceOp struct {
-	Value interface{} // The new value to set
+	Value any // The new value to set
 }
 
 func (op ReplaceOp) Type() string { return "Replace" }
@@ -98,8 +98,8 @@ func (op ReplaceOp) Type() string { return "Replace" }
 // AddOp adds a new key-value pair at the given path.
 // The path should point to a mapping.
 type AddOp struct {
-	Key   string      // The key to add
-	Value interface{} // The value to add
+	Key   string // The key to add
+	Value any    // The value to add
 }
 
 func (op AddOp) Type() string { return "Add" }
@@ -109,8 +109,8 @@ func (op AddOp) Type() string { return "Add" }
 // If both the existing value and new value are mappings, they are merged together.
 // Otherwise, the new value replaces the existing one.
 type MergeIntoOp struct {
-	Key   string      // The key to merge
-	Value interface{} // The value to merge
+	Key   string // The key to merge
+	Value any    // The value to merge
 }
 
 func (op MergeIntoOp) Type() string { return "MergeInto" }

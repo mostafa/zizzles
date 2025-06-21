@@ -19,7 +19,6 @@ var (
 	}
 
 	lineNumberStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#0087d7"))
-	suggestionStyle = lipgloss.NewStyle().Bold(true)
 	messageStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
 )
 

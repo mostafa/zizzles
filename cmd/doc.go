@@ -215,12 +215,6 @@ type docModel struct {
 	quit        bool
 }
 
-type errMsg struct {
-	err error
-}
-
-func (e errMsg) Error() string { return e.err.Error() }
-
 func (m docModel) Init() tea.Cmd {
 	return nil
 }

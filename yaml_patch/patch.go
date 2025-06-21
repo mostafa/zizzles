@@ -489,6 +489,8 @@ func detectStyle(node ast.Node) Style {
 }
 
 // convertToJSONPath converts dot notation (jobs.test.steps.0.run) to JSONPath ($.jobs.test.steps[0].run)
+//
+//nolint:unused
 func convertToJSONPath(dotPath string) string {
 	if dotPath == "" || dotPath == "." {
 		return "$"

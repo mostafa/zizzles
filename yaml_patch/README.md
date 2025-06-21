@@ -276,17 +276,17 @@ type RewriteFragmentOp struct {
 }
 
 type ReplaceOp struct {
-    Value interface{}
+    Value any
 }
 
 type AddOp struct {
     Key   string
-    Value interface{}
+    Value any
 }
 
 type MergeIntoOp struct {
     Key   string
-    Value interface{}
+    Value any
 }
 
 type RemoveOp struct {

@@ -105,9 +105,6 @@ func applyRewriteFragment(content string, nodeInfo *NodeInfo, op RewriteFragment
 				if startChar == '"' || startChar == '\'' {
 					actualStart++ // Skip the opening quote
 				}
-				if afterChar == '"' || afterChar == '\'' {
-					// The end position is already correct (before the closing quote)
-				}
 
 				// Extract the content without the outer quotes
 				innerContent := content[actualStart:actualEnd]
@@ -457,12 +454,13 @@ func applyMergeInto(content string, nodeInfo *NodeInfo, op MergeIntoOp) (string,
 		}
 	}
 
-	addOp := AddOp{Key: op.Key, Value: op.Value}
-	return applyAdd(content, nodeInfo, addOp)
+	// Fall back to adding the key since merge isn't possible (key doesn't exist or isn't a mapping)
+	// Convert MergeIntoOp to AddOp using type conversion since they have identical field structures
+	return applyAdd(content, nodeInfo, AddOp(op))
 }
 
 // applyRemove applies a Remove operation
-func applyRemove(content string, nodeInfo *NodeInfo, op RemoveOp) (string, error) {
+func applyRemove(content string, nodeInfo *NodeInfo, _ RemoveOp) (string, error) {
 	if len(nodeInfo.Path) == 0 {
 		return "", NewError("remove", "cannot remove root document", "")
 	}
