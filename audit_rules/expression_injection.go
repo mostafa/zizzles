@@ -876,44 +876,6 @@ func (r *ExpressionInjectionRule) extractVulnerableBlockInfo(node ast.Node, path
 	}
 }
 
-// extractRunBlockInfo extracts information from a run block node
-func (r *ExpressionInjectionRule) extractRunBlockInfo(node ast.Node, path []string) *RunBlockInfo {
-	var value string
-	var line, column int
-
-	switch n := node.(type) {
-	case *ast.StringNode:
-		value = n.Value
-		line = n.GetToken().Position.Line
-		column = n.GetToken().Position.Column
-	case *ast.LiteralNode:
-		value = n.String()
-		line = n.GetToken().Position.Line
-		column = n.GetToken().Position.Column
-	default:
-		return nil
-	}
-
-	// Check if this run block contains expressions
-	if !strings.Contains(value, "${{") {
-		return nil
-	}
-
-	expressions := r.extractExpressions(value)
-	if len(expressions) == 0 {
-		return nil
-	}
-
-	return &RunBlockInfo{
-		Node:        node,
-		Path:        path,
-		Line:        line,
-		Column:      column,
-		Value:       value,
-		Expressions: expressions,
-	}
-}
-
 // createFindingsForRunBlock creates findings for a specific run block with context analysis
 func (r *ExpressionInjectionRule) createFindingsForRunBlock(runBlock *RunBlockInfo, filePath string) {
 	// Get the context risk level for better messaging
