@@ -14,8 +14,8 @@ const CategoryCompositeAction types.Category = "composite_action"
 // CompositeActionRule provides detection for composite action security issues
 type CompositeActionRule struct {
 	types.Rule
-	detector     *CompositeActionDetector
-	seenFindings map[string]bool // For deduplication
+	*types.DeduplicatedRule
+	detector *CompositeActionDetector
 }
 
 // CompositeActionDetector provides AST-based detection for composite action vulnerabilities
@@ -32,31 +32,16 @@ func NewCompositeActionRule() *CompositeActionRule {
 			Message:  "Composite action security vulnerability detected",
 			Type:     types.RuleTypeAST,
 		},
-		seenFindings: make(map[string]bool),
+		DeduplicatedRule: types.NewDeduplicatedRule(),
 	}
 
 	rule.detector = &CompositeActionDetector{rule: rule}
 	return rule
 }
 
-// generateFindingKey creates a unique key for a finding that includes the rule category
-func (r *CompositeActionRule) generateFindingKey(filePath string, line, column int, value, yamlPath string) string {
-	return fmt.Sprintf("%s:%s:%d:%d:%s:%s", string(CategoryCompositeAction), filePath, line, column, value, yamlPath)
-}
-
 // addFindingIfNotSeen adds a finding only if it hasn't been seen before
 func (r *CompositeActionRule) addFindingIfNotSeen(finding *types.Finding, filePath string, value string, findings *[]*types.Finding) {
-	// Generate a unique key for this finding
-	key := r.generateFindingKey(filePath, finding.Line, finding.Column, value, finding.YamlPath)
-
-	// Check if we've already seen this finding
-	if r.seenFindings[key] {
-		return // Skip duplicate
-	}
-
-	// Mark as seen and add to findings
-	r.seenFindings[key] = true
-	*findings = append(*findings, finding)
+	r.DeduplicatedRule.AddFindingIfNotSeen(CategoryCompositeAction, finding, filePath, value, findings)
 }
 
 // VisitNode implements types.NodeVisitor for composite action detection

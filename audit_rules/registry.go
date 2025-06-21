@@ -17,22 +17,13 @@ func GetRuleSet(category types.Category) types.RuleSet {
 	return registry[category]
 }
 
-// GetAllRuleSets returns all rule sets
+// GetAllRuleSets returns all rule sets (currently unused but kept for future extensibility)
 func GetAllRuleSets() []types.RuleSet {
 	ruleSets := []types.RuleSet{}
 	for _, ruleSet := range registry {
 		ruleSets = append(ruleSets, ruleSet)
 	}
 	return ruleSets
-}
-
-// GetAllRules returns all rules
-func GetAllRules() []types.Rule {
-	rules := []types.Rule{}
-	for _, ruleSet := range registry {
-		rules = append(rules, ruleSet.Rules...)
-	}
-	return rules
 }
 
 // GetRulesByCategory returns rules by category
@@ -164,6 +155,9 @@ func CreateRuleExecutor() *types.RuleExecutor {
 
 	return executor
 }
+
+// Rule instance getters - these are simple wrappers that could be called directly
+// Kept for API consistency but could be removed in favor of direct constructor calls
 
 // GetExpressionInjectionRuleInstance returns a new instance of the expression injection rule
 func GetExpressionInjectionRuleInstance() *ExpressionInjectionRule {

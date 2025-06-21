@@ -13,8 +13,8 @@ const CategoryRunsVersion types.Category = "runs_version"
 // RunsVersionRule provides detection for deprecated or unsupported Node.js versions
 type RunsVersionRule struct {
 	types.Rule
-	detector     *RunsVersionDetector
-	seenFindings map[string]bool // For deduplication
+	*types.DeduplicatedRule
+	detector *RunsVersionDetector
 }
 
 // RunsVersionDetector provides AST-based detection for runs version vulnerabilities
@@ -38,31 +38,16 @@ func NewRunsVersionRule() *RunsVersionRule {
 			Message:  "Deprecated or unsupported Node.js version detected in runs configuration",
 			Type:     types.RuleTypeAST,
 		},
-		seenFindings: make(map[string]bool),
+		DeduplicatedRule: types.NewDeduplicatedRule(),
 	}
 
 	rule.detector = &RunsVersionDetector{rule: rule}
 	return rule
 }
 
-// generateFindingKey creates a unique key for a finding that includes the rule category
-func (r *RunsVersionRule) generateFindingKey(filePath string, line, column int, value, yamlPath string) string {
-	return fmt.Sprintf("%s:%s:%d:%d:%s:%s", string(CategoryRunsVersion), filePath, line, column, value, yamlPath)
-}
-
 // addFindingIfNotSeen adds a finding only if it hasn't been seen before
 func (r *RunsVersionRule) addFindingIfNotSeen(finding *types.Finding, filePath string, value string, findings *[]*types.Finding) {
-	// Generate a unique key for this finding
-	key := r.generateFindingKey(filePath, finding.Line, finding.Column, value, finding.YamlPath)
-
-	// Check if we've already seen this finding
-	if r.seenFindings[key] {
-		return // Skip duplicate
-	}
-
-	// Mark as seen and add to findings
-	r.seenFindings[key] = true
-	*findings = append(*findings, finding)
+	r.DeduplicatedRule.AddFindingIfNotSeen(CategoryRunsVersion, finding, filePath, value, findings)
 }
 
 // VisitNode implements types.NodeVisitor for runs version detection

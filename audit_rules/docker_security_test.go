@@ -17,7 +17,7 @@ func TestNewDockerSecurityRule(t *testing.T) {
 	assert.Equal(t, types.SeverityHigh, rule.Severity)
 	assert.Equal(t, types.RuleTypeAST, rule.Type)
 	assert.NotNil(t, rule.detector)
-	assert.NotNil(t, rule.seenFindings)
+	assert.NotNil(t, rule.DeduplicatedRule)
 }
 
 func TestDockerSecurityRule_DetectUnpinnedImages(t *testing.T) {

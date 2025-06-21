@@ -29,6 +29,7 @@ const (
 // ExpressionInjectionRule consolidates all logic and state for expression injection detection and fixing
 type ExpressionInjectionRule struct {
 	types.Rule
+	*types.DeduplicatedRule
 	Expressions         []string
 	EnvVariables        map[string]string
 	FixedRun            string
@@ -38,7 +39,6 @@ type ExpressionInjectionRule struct {
 	Fixes               []string
 	detector            *ExpressionInjectionDetector
 	contextCapabilities map[string]ContextCapability
-	seenFindings        map[string]bool // For deduplication
 }
 
 // RunBlockInfo contains information about a run block that needs fixing
@@ -79,12 +79,12 @@ func NewExpressionInjectionRule() *ExpressionInjectionRule {
 			Message:  "Untrusted input expression found in run block - potential command injection",
 			Type:     types.RuleTypeAST,
 		},
+		DeduplicatedRule:    types.NewDeduplicatedRule(),
 		Expressions:         make([]string, 0),
 		EnvVariables:        make(map[string]string),
 		Findings:            make([]*types.Finding, 0),
 		Fixes:               make([]string, 0),
 		contextCapabilities: initializeContextCapabilities(),
-		seenFindings:        make(map[string]bool),
 	}
 
 	rule.detector = &ExpressionInjectionDetector{rule: rule}
@@ -740,25 +740,9 @@ func (r *ExpressionInjectionRule) capabilityString(capability ContextCapability)
 	}
 }
 
-// generateFindingKey creates a unique key for a finding based on its exact location and content
-// This ensures that the same expression appearing on different lines is not deduplicated
-func (r *ExpressionInjectionRule) generateFindingKey(filePath string, line, column int, expression, yamlPath string) string {
-	return fmt.Sprintf("%s:%d:%d:%s:%s", filePath, line, column, expression, yamlPath)
-}
-
 // addFindingIfNotSeen adds a finding only if it hasn't been seen before
 func (r *ExpressionInjectionRule) addFindingIfNotSeen(finding *types.Finding, filePath string, expression string, findings *[]*types.Finding) {
-	// Generate a unique key for this finding based on location and expression content
-	key := r.generateFindingKey(filePath, finding.Line, finding.Column, expression, finding.YamlPath)
-
-	// Check if we've already seen this finding
-	if r.seenFindings[key] {
-		return // Skip duplicate
-	}
-
-	// Mark as seen and add to findings
-	r.seenFindings[key] = true
-	*findings = append(*findings, finding)
+	r.DeduplicatedRule.AddFindingIfNotSeen(CategoryExpressionInjection, finding, filePath, expression, findings)
 	r.Findings = append(r.Findings, finding)
 }
 
@@ -772,7 +756,7 @@ func (r *ExpressionInjectionRule) DetectExpressionsInFile(filePath string) error
 
 	// Clear previous findings and reset deduplication map for this file
 	r.Findings = make([]*types.Finding, 0)
-	r.seenFindings = make(map[string]bool)
+	r.DeduplicatedRule.ResetDeduplication()
 
 	// Detect expressions in each document
 	for _, doc := range file.Docs {
@@ -784,11 +768,6 @@ func (r *ExpressionInjectionRule) DetectExpressionsInFile(filePath string) error
 
 // detectExpressionsInDocument detects expressions in a single document
 func (r *ExpressionInjectionRule) detectExpressionsInDocument(doc ast.Node, filePath string) {
-	// Initialize deduplication map if not already done
-	if r.seenFindings == nil {
-		r.seenFindings = make(map[string]bool)
-	}
-
 	// Find all vulnerable blocks with expressions (run, shell, if, etc.)
 	vulnerableBlocks := r.findVulnerableBlocksWithExpressions(doc)
 
@@ -809,13 +788,6 @@ func (r *ExpressionInjectionRule) findVulnerableBlocksWithExpressions(node ast.N
 	return vulnerableBlocks
 }
 
-// findRunBlocksWithExpressions finds all run blocks containing expressions (kept for compatibility)
-func (r *ExpressionInjectionRule) findRunBlocksWithExpressions(node ast.Node) []*RunBlockInfo {
-	var runBlocks []*RunBlockInfo
-	r.traverseForRunBlocks(node, []string{}, &runBlocks)
-	return runBlocks
-}
-
 // traverseForVulnerableBlocks recursively traverses the AST to find vulnerable blocks
 func (r *ExpressionInjectionRule) traverseForVulnerableBlocks(node ast.Node, path []string, blocks *[]*RunBlockInfo) {
 	if node == nil {
@@ -830,24 +802,6 @@ func (r *ExpressionInjectionRule) traverseForVulnerableBlocks(node ast.Node, pat
 	case *ast.DocumentNode:
 		if n.Body != nil {
 			r.traverseForVulnerableBlocks(n.Body, path, blocks)
-		}
-	}
-}
-
-// traverseForRunBlocks recursively traverses the AST to find run blocks
-func (r *ExpressionInjectionRule) traverseForRunBlocks(node ast.Node, path []string, runBlocks *[]*RunBlockInfo) {
-	if node == nil {
-		return
-	}
-
-	switch n := node.(type) {
-	case *ast.MappingNode:
-		r.traverseMappingForRunBlocks(n, path, runBlocks)
-	case *ast.SequenceNode:
-		r.traverseSequenceForRunBlocks(n, path, runBlocks)
-	case *ast.DocumentNode:
-		if n.Body != nil {
-			r.traverseForRunBlocks(n.Body, path, runBlocks)
 		}
 	}
 }
@@ -876,43 +830,11 @@ func (r *ExpressionInjectionRule) traverseMappingForVulnerableBlocks(node *ast.M
 	}
 }
 
-// traverseMappingForRunBlocks processes mapping nodes to find run blocks
-func (r *ExpressionInjectionRule) traverseMappingForRunBlocks(node *ast.MappingNode, path []string, runBlocks *[]*RunBlockInfo) {
-	for i := 0; i < len(node.Values); i++ {
-		key := node.Values[i].Key
-		value := node.Values[i].Value
-
-		if key == nil || value == nil {
-			continue
-		}
-
-		currentPath := append(path, key.String())
-
-		// Check if this is a 'run' key
-		if key.String() == "run" {
-			if runInfo := r.extractRunBlockInfo(value, currentPath); runInfo != nil {
-				*runBlocks = append(*runBlocks, runInfo)
-			}
-		}
-
-		// Recursively traverse child nodes
-		r.traverseForRunBlocks(value, currentPath, runBlocks)
-	}
-}
-
 // traverseSequenceForVulnerableBlocks processes sequence nodes for vulnerable blocks
 func (r *ExpressionInjectionRule) traverseSequenceForVulnerableBlocks(node *ast.SequenceNode, path []string, blocks *[]*RunBlockInfo) {
 	for i, value := range node.Values {
 		currentPath := append(path, fmt.Sprintf("%d", i))
 		r.traverseForVulnerableBlocks(value, currentPath, blocks)
-	}
-}
-
-// traverseSequenceForRunBlocks processes sequence nodes
-func (r *ExpressionInjectionRule) traverseSequenceForRunBlocks(node *ast.SequenceNode, path []string, runBlocks *[]*RunBlockInfo) {
-	for i, value := range node.Values {
-		currentPath := append(path, fmt.Sprintf("%d", i))
-		r.traverseForRunBlocks(value, currentPath, runBlocks)
 	}
 }
 
@@ -1079,7 +1001,7 @@ func (r *ExpressionInjectionRule) FixFile(filePath string) (string, error) {
 	r.Fixes = make([]string, 0)
 
 	// Find all run blocks with expressions
-	runBlocks := r.findRunBlocksWithExpressions(file.Docs[0].Body)
+	runBlocks := r.findVulnerableBlocksWithExpressions(file.Docs[0].Body)
 
 	if len(runBlocks) == 0 {
 		return content, nil // No fixes needed
@@ -1249,7 +1171,7 @@ func (r *ExpressionInjectionRule) GetEnvVariables() map[string]string {
 
 // ResetDeduplication resets the deduplication state for testing purposes
 func (r *ExpressionInjectionRule) ResetDeduplication() {
-	r.seenFindings = make(map[string]bool)
+	r.DeduplicatedRule.ResetDeduplication()
 	r.Findings = make([]*types.Finding, 0)
 }
 

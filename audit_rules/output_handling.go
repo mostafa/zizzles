@@ -1,7 +1,6 @@
 package audit_rules
 
 import (
-	"fmt"
 	"regexp"
 	"strings"
 
@@ -14,8 +13,8 @@ const CategoryOutputHandling types.Category = "output_handling"
 // OutputHandlingRule provides detection for output handling and sensitive data issues
 type OutputHandlingRule struct {
 	types.Rule
-	detector     *OutputHandlingDetector
-	seenFindings map[string]bool // For deduplication
+	*types.DeduplicatedRule
+	detector *OutputHandlingDetector
 }
 
 // OutputHandlingDetector provides AST-based detection for output handling vulnerabilities
@@ -32,31 +31,16 @@ func NewOutputHandlingRule() *OutputHandlingRule {
 			Message:  "Output handling security issue detected",
 			Type:     types.RuleTypeAST,
 		},
-		seenFindings: make(map[string]bool),
+		DeduplicatedRule: types.NewDeduplicatedRule(),
 	}
 
 	rule.detector = &OutputHandlingDetector{rule: rule}
 	return rule
 }
 
-// generateFindingKey creates a unique key for a finding that includes the rule category
-func (r *OutputHandlingRule) generateFindingKey(filePath string, line, column int, value, yamlPath string) string {
-	return fmt.Sprintf("%s:%s:%d:%d:%s:%s", string(CategoryOutputHandling), filePath, line, column, value, yamlPath)
-}
-
 // addFindingIfNotSeen adds a finding only if it hasn't been seen before
 func (r *OutputHandlingRule) addFindingIfNotSeen(finding *types.Finding, filePath string, value string, findings *[]*types.Finding) {
-	// Generate a unique key for this finding
-	key := r.generateFindingKey(filePath, finding.Line, finding.Column, value, finding.YamlPath)
-
-	// Check if we've already seen this finding
-	if r.seenFindings[key] {
-		return // Skip duplicate
-	}
-
-	// Mark as seen and add to findings
-	r.seenFindings[key] = true
-	*findings = append(*findings, finding)
+	r.DeduplicatedRule.AddFindingIfNotSeen(CategoryOutputHandling, finding, filePath, value, findings)
 }
 
 // VisitNode implements types.NodeVisitor for output handling detection

@@ -405,7 +405,7 @@ runs:
 	uniqueFindings := make(map[string]bool)
 	duplicates := 0
 	for _, finding := range findings {
-		key := rule.generateFindingKey("action.yml", finding.Line, finding.Column, finding.Value, finding.YamlPath)
+		key := rule.GenerateFindingKey(CategoryCompositeAction, "action.yml", finding.Line, finding.Column, finding.Value, finding.YamlPath)
 		if uniqueFindings[key] {
 			duplicates++
 		}

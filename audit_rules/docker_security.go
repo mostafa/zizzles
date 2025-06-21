@@ -14,8 +14,8 @@ const CategoryDockerSecurity types.Category = "docker_security"
 // DockerSecurityRule provides detection for Docker action security vulnerabilities
 type DockerSecurityRule struct {
 	types.Rule
-	detector     *DockerSecurityDetector
-	seenFindings map[string]bool // For deduplication
+	*types.DeduplicatedRule
+	detector *DockerSecurityDetector
 }
 
 // DockerSecurityDetector provides AST-based detection for Docker security vulnerabilities
@@ -50,28 +50,24 @@ func NewDockerSecurityRule() *DockerSecurityRule {
 			Message:  "Docker action security vulnerability detected",
 			Type:     types.RuleTypeAST,
 		},
-		seenFindings: make(map[string]bool),
+		DeduplicatedRule: types.NewDeduplicatedRule(),
 	}
 
 	rule.detector = &DockerSecurityDetector{rule: rule}
 	return rule
 }
 
-// generateFindingKey creates a unique key for a finding
-func (r *DockerSecurityRule) generateFindingKey(filePath string, line, column int, value, yamlPath, message string) string {
-	return fmt.Sprintf("%s:%s:%d:%d:%s:%s:%s", string(CategoryDockerSecurity), filePath, line, column, value, yamlPath, message)
-}
-
 // addFindingIfNotSeen adds a finding only if it hasn't been seen before
 func (r *DockerSecurityRule) addFindingIfNotSeen(finding *types.Finding, filePath string, value string, findings *[]*types.Finding) {
-	key := r.generateFindingKey(filePath, finding.Line, finding.Column, value, finding.YamlPath, finding.Rule.Message)
+	// Docker security has custom key generation that includes message for better deduplication
+	key := fmt.Sprintf("%s:%s:%d:%d:%s:%s:%s", string(CategoryDockerSecurity), filePath, finding.Line, finding.Column, value, finding.YamlPath, finding.Rule.Message)
 
-	if r.seenFindings[key] {
-		return // Skip duplicate
+	if r.DeduplicatedRule.GenerateFindingKey(CategoryDockerSecurity, filePath, finding.Line, finding.Column, value, finding.YamlPath) != key {
+		// Use custom key for docker security due to message-based deduplication
+		r.DeduplicatedRule.AddFindingIfNotSeen(CategoryDockerSecurity, finding, filePath, value+":"+finding.Rule.Message, findings)
+	} else {
+		r.DeduplicatedRule.AddFindingIfNotSeen(CategoryDockerSecurity, finding, filePath, value, findings)
 	}
-
-	r.seenFindings[key] = true
-	*findings = append(*findings, finding)
 }
 
 // VisitNode implements types.NodeVisitor for Docker security detection

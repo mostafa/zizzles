@@ -146,7 +146,7 @@ func printFileSummary(filename string, findings map[types.Category][]*types.Find
 		return fmt.Sprintf("%s%d\033[0m", color, num)
 	}
 
-	fmt.Printf("📝 %s: %d finding%s (%s critical, %s high, %s medium, %s low, %s info)",
+	fmt.Printf("📝 %s: %d finding%s (%s info, %s low, %s medium, %s high, %s critical)",
 		filename,
 		totalCount,
 		func() string {
@@ -155,11 +155,11 @@ func printFileSummary(filename string, findings map[types.Category][]*types.Find
 			}
 			return "s"
 		}(),
-		colorNum(counts[types.SeverityCritical], "\033[1;31m"), // Bold red
-		colorNum(counts[types.SeverityHigh], "\033[31m"),       // Red
-		colorNum(counts[types.SeverityMedium], "\033[33m"),     // Yellow
-		colorNum(counts[types.SeverityLow], "\033[32m"),        // Green
 		colorNum(counts[types.SeverityInfo], "\033[32m"),       // Green
+		colorNum(counts[types.SeverityLow], "\033[32m"),        // Green
+		colorNum(counts[types.SeverityMedium], "\033[33m"),     // Yellow
+		colorNum(counts[types.SeverityHigh], "\033[31m"),       // Red
+		colorNum(counts[types.SeverityCritical], "\033[1;31m"), // Bold red
 	)
 
 	if minSeverity != "" && filteredCount != totalCount {
