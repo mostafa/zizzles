@@ -15,3 +15,6 @@ var RunsVersionDocs string
 
 //go:embed audit_rules/docker_security.md
 var DockerSecurityDocs string
+
+//go:embed audit_rules/composite_action.md
+var CompositeActionDocs string

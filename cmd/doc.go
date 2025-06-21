@@ -20,6 +20,7 @@ var availableTopics = map[string]string{
 	"output-handling":      docs.OutputHandlingDocs,
 	"runs-version":         docs.RunsVersionDocs,
 	"docker-security":      docs.DockerSecurityDocs,
+	"composite-action":     docs.CompositeActionDocs,
 }
 
 // docItem represents a documentation topic in the list
@@ -46,6 +47,7 @@ Available topics:
   output-handling         - Learn about output handling vulnerabilities
   runs-version            - Learn about runs version vulnerabilities
   docker-security         - Learn about docker security vulnerabilities
+  composite-action        - Learn about composite action vulnerabilities
 
 Example:
   zizzles doc expression-injection
@@ -304,23 +306,28 @@ func createMenuModel() menuModel {
 	items := []list.Item{
 		docItem{
 			title:       "Expression Injection",
-			description: "Learn about expression injection vulnerabilities in GitHub Actions",
+			description: "Detects shell command injection via GitHub Actions expressions in user-controllable contexts",
 			key:         "expression-injection",
 		},
 		docItem{
 			title:       "Output Handling",
-			description: "Learn about output handling vulnerabilities in GitHub Actions",
+			description: "Identifies deprecated commands, secret exposure, and unsafe output patterns in workflows",
 			key:         "output-handling",
 		},
 		docItem{
 			title:       "Runs Version",
-			description: "Learn about runs version vulnerabilities in GitHub Actions",
+			description: "Flags deprecated Node.js versions and missing runtime specifications in custom actions",
 			key:         "runs-version",
 		},
 		docItem{
 			title:       "Docker Security",
-			description: "Learn about docker security vulnerabilities",
+			description: "Scans for unpinned images, root execution, and insecure containerization practices",
 			key:         "docker-security",
+		},
+		docItem{
+			title:       "Composite Action",
+			description: "Analyzes composite actions for input injection, unpinned actions, and unsafe defaults",
+			key:         "composite-action",
 		},
 	}
 

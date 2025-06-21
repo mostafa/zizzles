@@ -23,7 +23,7 @@ build-debug:
 
 .PHONY: test
 test:
-	@go test ./...
+	@go test -v ./...
 
 .PHONY: run
 run:

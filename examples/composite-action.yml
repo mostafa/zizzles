@@ -1,0 +1,87 @@
+name: 'Vulnerable Composite Action'
+description: 'Example composite action with multiple security issues'
+author: 'Security Team'
+
+inputs:
+  message:
+    description: 'Message to display'
+    required: true
+  
+  command:
+    description: 'Command to execute'
+    required: false
+    default: 'echo "test"; rm -rf /'  # ISSUE: Unsafe default with metacharacters
+  
+  safe_input:
+    description: 'Safe input example'
+    required: false
+    default: 'hello-world'
+
+runs:
+  using: 'composite'
+  steps:
+    # ISSUE: Direct input injection in run step
+    - name: Display unsafe message
+      run: echo "${{ inputs.message }}"
+      shell: bash
+    
+    # ISSUE: Another direct input injection
+    - name: Execute unsafe command
+      run: ${{ inputs.command }}
+      shell: bash
+    
+    # ISSUE: Environment leakage
+    - name: Write to environment unsafely
+      run: echo "USER_MSG=${{ inputs.message }}" >> $GITHUB_ENV
+      shell: bash
+    
+    # ISSUE: Unpinned action with floating tag
+    - name: Checkout with floating tag
+      uses: actions/checkout@main
+    
+    # ISSUE: Action without version
+    - name: Setup Node without version
+      uses: actions/setup-node
+      with:
+        node-version: '18'
+    
+    # ISSUE: Run step without explicit shell
+    - name: Run without shell
+      run: echo "No shell specified"
+    
+    # ISSUE: Checkout without credential safety consideration
+    - name: Another checkout
+      uses: actions/checkout@v4
+    
+    # GOOD: Safe usage with environment variables
+    - name: Display safe message
+      env:
+        MESSAGE: ${{ inputs.message }}
+        SAFE_INPUT: ${{ inputs.safe_input }}
+      run: |
+        echo "Message: $MESSAGE"
+        echo "Safe input: $SAFE_INPUT"
+      shell: bash
+    
+    # GOOD: Properly pinned action
+    - name: Setup Node safely
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+    
+    # GOOD: Checkout with credential safety
+    - name: Safe checkout
+      uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+    
+    # GOOD: Safer environment variable setting
+    - name: Set environment safely
+      env:
+        INPUT_VALUE: ${{ inputs.safe_input }}
+      run: echo "MYACTION_VALUE=$INPUT_VALUE" >> $GITHUB_ENV
+      shell: bash
+
+branding:
+  icon: 'alert-triangle'
+  color: 'red' 

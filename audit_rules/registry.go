@@ -9,6 +9,7 @@ func init() {
 	registry[CategoryOutputHandling] = GetOutputHandlingRules()
 	registry[CategoryRunsVersion] = GetRunsVersionRules()
 	registry[CategoryDockerSecurity] = GetDockerSecurityRules()
+	registry[CategoryCompositeAction] = GetCompositeActionRules()
 }
 
 // GetRuleSet returns a rule set by category
@@ -81,6 +82,14 @@ func GetASTRules() []*types.ASTRule {
 		Visitor:  dockerSecurityRule.detector,
 	})
 
+	compositeActionRule := NewCompositeActionRule()
+	astRules = append(astRules, &types.ASTRule{
+		Category: CategoryCompositeAction,
+		Severity: types.SeverityHigh,
+		Message:  "Composite action security vulnerability detected",
+		Visitor:  compositeActionRule.detector,
+	})
+
 	return astRules
 }
 
@@ -128,6 +137,16 @@ func GetPatternRules() []*types.PatternRule {
 		})
 	}
 
+	compositeActionRules := GetCompositeActionRules()
+	for _, rule := range compositeActionRules.Rules {
+		patternRules = append(patternRules, &types.PatternRule{
+			Category: rule.Category,
+			Pattern:  rule.Pattern,
+			Severity: rule.Severity,
+			Message:  rule.Message,
+		})
+	}
+
 	return patternRules
 }
 
@@ -164,4 +183,9 @@ func GetRunsVersionRuleInstance() *RunsVersionRule {
 // GetDockerSecurityRuleInstance returns a new instance of the docker security rule
 func GetDockerSecurityRuleInstance() *DockerSecurityRule {
 	return NewDockerSecurityRule()
+}
+
+// GetCompositeActionRuleInstance returns a new instance of the composite action rule
+func GetCompositeActionRuleInstance() *CompositeActionRule {
+	return NewCompositeActionRule()
 }
