@@ -20,6 +20,7 @@ var (
 	quiet         bool
 	fix           bool
 	severityLevel string
+	exportPath    string
 )
 
 var runCmd = &cobra.Command{
@@ -218,11 +219,31 @@ func runAudit(cmd *cobra.Command, args []string) {
 			fmt.Println("\n🔧 Fix functionality is not yet implemented.")
 		}
 
+		// Export to SARIF if requested
+		if exportPath != "" {
+			fmt.Printf("\n📄 Exporting findings to SARIF format: %s\n", exportPath)
+			if err := types.ExportFindings(allFindings, exportPath); err != nil {
+				fmt.Printf("❌ Failed to export SARIF: %v\n", err)
+				os.Exit(1)
+			}
+			fmt.Printf("✅ Successfully exported %d findings to SARIF file\n", totalCount)
+		}
+
 		os.Exit(1)
 	}
 
 	if !quiet {
 		fmt.Println("🎉 No security findings found. Your GitHub Actions metadata is looking good!")
+	}
+
+	// Export empty SARIF report if requested
+	if exportPath != "" {
+		fmt.Printf("\n📄 Exporting empty findings to SARIF format: %s\n", exportPath)
+		if err := types.ExportFindings(allFindings, exportPath); err != nil {
+			fmt.Printf("❌ Failed to export SARIF: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Println("✅ Successfully exported empty SARIF file")
 	}
 }
 
@@ -232,4 +253,5 @@ func init() {
 	runCmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "Quiet mode - suppress banner and success messages")
 	runCmd.Flags().BoolVar(&fix, "fix", false, "Automatically fix issues where possible (not yet implemented)")
 	runCmd.Flags().StringVarP(&severityLevel, "severity", "s", "info", "Filter findings by minimum severity level (info, low, medium, high, critical)")
+	runCmd.Flags().StringVarP(&exportPath, "export", "e", "", "Export findings to SARIF 2.2 format (specify output file path)")
 }
