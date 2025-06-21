@@ -1,0 +1,222 @@
+# This file demonstrates Docker action security vulnerabilities that Zizzles can detect.
+#
+# CRITICAL RISK:
+# - Unpinned dangerous tags: latest, main, master, develop
+#
+# HIGH RISK:
+# - Unpinned images without SHA256 digest
+# - Root user execution (missing USER directive)
+# - Secrets exposure in logs/output
+#
+# MEDIUM RISK:
+# - Non-minimal base images (ubuntu, debian, centos, fedora)
+# - Development tools in production images
+#
+# SAFE:
+# - Properly pinned images with SHA256 digest
+# - Minimal base images (alpine, scratch, distroless)
+# - Non-root user execution
+# - No secrets exposure
+#
+# The file covers:
+# - All categories of Docker security vulnerabilities
+# - Different severity levels
+# - Safe and unsafe examples
+# - Complex scenarios with multiple issues
+
+name: Docker Security Examples
+
+# CRITICAL RISK - Dangerous unpinned tags
+docker_latest_tag:
+  name: Latest Tag Action
+  description: Uses dangerous 'latest' tag
+  runs:
+    using: docker
+    image: docker://ubuntu:latest  # Critical: latest tag
+
+docker_main_tag:
+  name: Main Tag Action
+  description: Uses dangerous 'main' tag
+  runs:
+    using: docker
+    image: docker://myorg/myapp:main  # Critical: main tag
+
+docker_master_tag:
+  name: Master Tag Action
+  description: Uses dangerous 'master' tag
+  runs:
+    using: docker
+    image: docker://myorg/myapp:master  # Critical: master tag
+
+# HIGH RISK - Unpinned images
+docker_unpinned_version:
+  name: Unpinned Version Action
+  description: Uses specific version but no SHA256 digest
+  runs:
+    using: docker
+    image: docker://node:18.16.0-alpine  # High: not pinned with SHA256
+
+# HIGH RISK - Root user execution
+docker_root_user:
+  name: Root User Action
+  description: Dockerfile without USER directive
+  runs:
+    using: docker
+    dockerfile: |
+      FROM node:18-alpine
+      COPY . /app
+      WORKDIR /app
+      RUN npm install
+      CMD ["node", "index.js"]  # High: runs as root
+
+# HIGH RISK - Secrets exposure
+docker_secrets_exposure:
+  name: Secrets Exposure Action
+  description: Exposes secrets in logs
+  runs:
+    using: docker
+    dockerfile: |
+      FROM alpine:3.18
+      COPY . /app
+      WORKDIR /app
+      RUN echo "Debug token: $INPUT_SECRET_TOKEN"  # High: secret exposure
+      CMD ["./app"]
+
+# MEDIUM RISK - Non-minimal base images
+docker_ubuntu_base:
+  name: Ubuntu Base Action
+  description: Uses full Ubuntu image
+  runs:
+    using: docker
+    image: docker://ubuntu:20.04  # Medium: full OS image
+
+docker_debian_base:
+  name: Debian Base Action
+  description: Uses full Debian image
+  runs:
+    using: docker
+    image: docker://debian:bullseye  # Medium: full OS image
+
+docker_centos_base:
+  name: CentOS Base Action
+  description: Uses full CentOS image
+  runs:
+    using: docker
+    image: docker://centos:8  # Medium: full OS image
+
+# MEDIUM RISK - Development tools
+docker_dev_tools:
+  name: Development Tools Action
+  description: Includes development tools in production image
+  runs:
+    using: docker
+    dockerfile: |
+      FROM alpine:3.18
+      RUN apk add --no-cache curl wget git build-essential  # Medium: dev tools
+      COPY . /app
+      WORKDIR /app
+      CMD ["./app"]
+
+docker_build_tools:
+  name: Build Tools Action
+  description: Includes build tools
+  runs:
+    using: docker
+    dockerfile: |
+      FROM ubuntu:20.04
+      RUN apt-get update && apt-get install -y gcc make cmake  # Medium: build tools
+      COPY . /app
+      WORKDIR /app
+      CMD ["./app"]
+
+# SAFE EXAMPLES - Properly secured Docker actions
+docker_safe_pinned:
+  name: Safe Pinned Action
+  description: Properly pinned with SHA256 digest
+  runs:
+    using: docker
+    image: docker://node:18.16.0-alpine@sha256:a1b2c3d4e5f6789012345678901234567890123456789012345678901234567890
+
+docker_safe_minimal:
+  name: Safe Minimal Action
+  description: Uses minimal alpine base image
+  runs:
+    using: docker
+    dockerfile: |
+      FROM alpine:3.18
+      RUN adduser -D -s /bin/sh appuser
+      COPY . /app
+      WORKDIR /app
+      USER appuser  # Safe: non-root user
+      CMD ["./app"]
+
+docker_safe_scratch:
+  name: Safe Scratch Action
+  description: Uses scratch base image
+  runs:
+    using: docker
+    image: docker://scratch
+
+docker_safe_distroless:
+  name: Safe Distroless Action
+  description: Uses distroless base image
+  runs:
+    using: docker
+    image: docker://gcr.io/distroless/static:nonroot
+
+docker_safe_slim:
+  name: Safe Slim Action
+  description: Uses slim variant of OS image
+  runs:
+    using: docker
+    image: docker://ubuntu-slim:20.04
+
+# COMPLEX EXAMPLES - Multiple security issues
+docker_multiple_issues:
+  name: Multiple Issues Action
+  description: Contains multiple security vulnerabilities
+  runs:
+    using: docker
+    image: docker://ubuntu:latest  # Critical: latest tag
+    dockerfile: |
+      FROM ubuntu:20.04  # Medium: full OS image
+      RUN apt-get update && apt-get install -y curl build-essential  # Medium: dev tools
+      COPY . /app
+      WORKDIR /app
+      RUN echo "Secret: $INPUT_API_KEY"  # High: secret exposure
+      # Missing USER directive  # High: runs as root
+      CMD ["./app"]
+
+docker_quoted_issues:
+  name: Quoted Issues Action
+  description: Security issues with quoted values
+  runs:
+    using: docker
+    image: "docker://ubuntu:latest"  # Critical: still detected with quotes
+    dockerfile: |
+      FROM 'ubuntu:20.04'
+      RUN echo 'Debug: $INPUT_TOKEN'  # High: secret exposure with single quotes
+      CMD ["./app"]
+
+# SAFE COMPLEX EXAMPLE - Best practices
+docker_best_practices:
+  name: Best Practices Action
+  description: Demonstrates Docker security best practices
+  runs:
+    using: docker
+    image: docker://alpine:3.18@sha256:a1b2c3d4e5f6789012345678901234567890123456789012345678901234567890  # Safe: pinned
+    dockerfile: |
+      # Multi-stage build for security
+      FROM alpine:3.18 AS builder
+      RUN apk add --no-cache build-base  # Development tools only in build stage
+      COPY . /src
+      WORKDIR /src
+      RUN make build
+      
+      # Production stage - minimal and secure
+      FROM alpine:3.18@sha256:a1b2c3d4e5f6789012345678901234567890123456789012345678901234567890
+      RUN adduser -D -s /bin/sh appuser  # Create non-root user
+      COPY --from=builder /src/app /app/
+      WORKDIR /app
+      USER appuser  # Run as non-root
+      CMD ["./app"] 

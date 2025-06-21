@@ -115,7 +115,7 @@ func (d *RunsVersionDetector) checkDeprecatedNodeVersion(node ast.Node, path []s
 
 			if deprecatedVersion == "node12" {
 				severity = types.SeverityCritical
-				message = fmt.Sprintf("Critical: Node.js 12 is end-of-life and no longer supported - use node16 or node20 instead")
+				message = "Critical: Node.js 12 is end-of-life and no longer supported - use node16 or node20 instead"
 			}
 
 			finding := &types.Finding{

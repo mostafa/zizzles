@@ -8,6 +8,7 @@ func init() {
 	registry[CategoryExpressionInjection] = GetExpressionInjectionRules()
 	registry[CategoryOutputHandling] = GetOutputHandlingRules()
 	registry[CategoryRunsVersion] = GetRunsVersionRules()
+	registry[CategoryDockerSecurity] = GetDockerSecurityRules()
 }
 
 // GetRuleSet returns a rule set by category
@@ -72,6 +73,14 @@ func GetASTRules() []*types.ASTRule {
 		Visitor:  runsVersionRule.detector,
 	})
 
+	dockerSecurityRule := NewDockerSecurityRule()
+	astRules = append(astRules, &types.ASTRule{
+		Category: CategoryDockerSecurity,
+		Severity: types.SeverityHigh,
+		Message:  "Docker action security vulnerability detected",
+		Visitor:  dockerSecurityRule.detector,
+	})
+
 	return astRules
 }
 
@@ -101,6 +110,16 @@ func GetPatternRules() []*types.PatternRule {
 
 	runsVersionRules := GetRunsVersionRules()
 	for _, rule := range runsVersionRules.Rules {
+		patternRules = append(patternRules, &types.PatternRule{
+			Category: rule.Category,
+			Pattern:  rule.Pattern,
+			Severity: rule.Severity,
+			Message:  rule.Message,
+		})
+	}
+
+	dockerSecurityRules := GetDockerSecurityRules()
+	for _, rule := range dockerSecurityRules.Rules {
 		patternRules = append(patternRules, &types.PatternRule{
 			Category: rule.Category,
 			Pattern:  rule.Pattern,
@@ -140,4 +159,9 @@ func GetOutputHandlingRuleInstance() *OutputHandlingRule {
 // GetRunsVersionRuleInstance returns a new instance of the runs version rule
 func GetRunsVersionRuleInstance() *RunsVersionRule {
 	return NewRunsVersionRule()
+}
+
+// GetDockerSecurityRuleInstance returns a new instance of the docker security rule
+func GetDockerSecurityRuleInstance() *DockerSecurityRule {
+	return NewDockerSecurityRule()
 }

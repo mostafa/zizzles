@@ -12,3 +12,6 @@ var OutputHandlingDocs string
 
 //go:embed audit_rules/runs_version.md
 var RunsVersionDocs string
+
+//go:embed audit_rules/docker_security.md
+var DockerSecurityDocs string

@@ -19,6 +19,7 @@ var availableTopics = map[string]string{
 	"expression-injection": docs.ExpressionInjectionDocs,
 	"output-handling":      docs.OutputHandlingDocs,
 	"runs-version":         docs.RunsVersionDocs,
+	"docker-security":      docs.DockerSecurityDocs,
 }
 
 // docItem represents a documentation topic in the list
@@ -44,6 +45,7 @@ Available topics:
   expression-injection    - Learn about expression injection vulnerabilities
   output-handling         - Learn about output handling vulnerabilities
   runs-version            - Learn about runs version vulnerabilities
+  docker-security         - Learn about docker security vulnerabilities
 
 Example:
   zizzles doc expression-injection
@@ -314,6 +316,11 @@ func createMenuModel() menuModel {
 			title:       "Runs Version",
 			description: "Learn about runs version vulnerabilities in GitHub Actions",
 			key:         "runs-version",
+		},
+		docItem{
+			title:       "Docker Security",
+			description: "Learn about docker security vulnerabilities",
+			key:         "docker-security",
 		},
 	}
 
