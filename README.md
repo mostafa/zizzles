@@ -11,6 +11,7 @@ Zizzles is a static analysis tool that helps you identify and fix security vulne
 
 - 🛡️ **Supported Audit Rules**:
     - **Expression Injection**: Identifies dangerous uses of GitHub Actions expressions that could lead to command injection
+    - **Output Handling**: Detects insecure output practices, sensitive data leaks, and deprecated output commands
 - 🎯 **Smart Risk Assessment**: Context-aware analysis with different severity levels (High, Medium, Low)
 - 🔧 **Automated Fixes**: Suggests and applies secure alternatives to vulnerable patterns
 - 📊 **Multiple Output Formats**: Human-readable reports and SARIF 2.2 for tool integration
@@ -18,11 +19,44 @@ Zizzles is a static analysis tool that helps you identify and fix security vulne
 - 📚 **Interactive Documentation**: Built-in docs with detailed explanations and examples
 - 🎨 **Beautiful CLI**: Modern terminal UI with colors and emojis
 
-## 🚨 What is Expression Injection?
+## 🚨 Security Vulnerabilities Detected
+
+### Expression Injection
 
 Expression injection is a critical security vulnerability where untrusted user input is directly interpolated into shell commands through GitHub's expression syntax (`${{ ... }}`). This can allow attackers to execute arbitrary commands in your CI/CD environment.
 
+**Example of vulnerable code:**
+```yaml
+- name: Process user input
+  run: echo "Hello ${{ github.event.issue.title }}"  # Dangerous!
+```
+
 For detailed information, examples, and mitigation strategies, see our comprehensive [Expression Injection Documentation](docs/audit_rules/expression_injection.md).
+
+### Output Handling
+
+Output handling vulnerabilities occur when workflows improperly manage sensitive data, use deprecated output methods, or create outputs that could leak confidential information. These issues can expose secrets, tokens, and user-controlled data.
+
+**Common output handling issues:**
+- **Secret leakage**: Direct exposure of secrets or tokens in outputs
+- **Deprecated commands**: Using old `::set-output` syntax instead of `$GITHUB_OUTPUT`
+- **Missing descriptions**: Outputs without clear documentation
+- **User input exposure**: Directly outputting user-controlled data without validation
+- **Unsafe shell usage**: Unquoted output usage that could lead to injection
+
+**Example of vulnerable code:**
+```yaml
+outputs:
+  api_key:
+    description: "API key"
+    value: ${{ secrets.API_KEY }}  # Exposes secret!
+  
+steps:
+  - name: Old output method
+    run: echo "::set-output name=result::${{ inputs.user_data }}"  # Deprecated!
+```
+
+For detailed information, examples, and mitigation strategies, see our comprehensive [Output Handling Documentation](docs/audit_rules/output_handling.md).
 
 ## 🚀 Installation
 
@@ -97,6 +131,7 @@ zizzles doc
 
 # View specific topic
 zizzles doc expression-injection
+zizzles doc output-handling
 ```
 
 **Navigation in documentation viewer:**
@@ -176,12 +211,23 @@ repos:
 
 ## 🎯 Best Practices
 
+### Expression Injection Prevention
 1. **Always use environment variables** for user-controllable data
 2. **Quote your variables** in shell commands: `"$VARIABLE"` not `$VARIABLE`
 3. **Validate input** when possible before using it
 4. **Use safe contexts directly** - no need to wrap `github.repository` in env vars
-5. **Review pull requests** from external contributors carefully
-6. **Run zizzles in CI** to catch issues early
+
+### Output Handling Security
+5. **Never expose secrets in outputs** - avoid `${{ secrets.* }}` in output values
+6. **Use modern output syntax** - `echo "key=value" >> $GITHUB_OUTPUT` instead of `::set-output`
+7. **Document your outputs** - always provide clear descriptions for action outputs
+8. **Validate user input** before outputting - sanitize user-controlled data
+9. **Quote output usage** - wrap step outputs in quotes when used in shell commands
+
+### General Security
+10. **Review pull requests** from external contributors carefully
+11. **Run zizzles in CI** to catch issues early
+12. **Keep workflows minimal** - reduce the attack surface by limiting complexity
 
 ## 🤝 Contributing
 
