@@ -7,6 +7,7 @@ var registry = make(map[types.Category]types.RuleSet)
 func init() {
 	registry[CategoryExpressionInjection] = GetExpressionInjectionRules()
 	registry[CategoryOutputHandling] = GetOutputHandlingRules()
+	registry[CategoryRunsVersion] = GetRunsVersionRules()
 }
 
 // GetRuleSet returns a rule set by category
@@ -63,6 +64,14 @@ func GetASTRules() []*types.ASTRule {
 		Visitor:  outputHandlingRule.detector,
 	})
 
+	runsVersionRule := NewRunsVersionRule()
+	astRules = append(astRules, &types.ASTRule{
+		Category: CategoryRunsVersion,
+		Severity: types.SeverityHigh,
+		Message:  "Deprecated or unsupported Node.js version detected in runs configuration",
+		Visitor:  runsVersionRule.detector,
+	})
+
 	return astRules
 }
 
@@ -82,6 +91,16 @@ func GetPatternRules() []*types.PatternRule {
 
 	outputHandlingRules := GetOutputHandlingRules()
 	for _, rule := range outputHandlingRules.Rules {
+		patternRules = append(patternRules, &types.PatternRule{
+			Category: rule.Category,
+			Pattern:  rule.Pattern,
+			Severity: rule.Severity,
+			Message:  rule.Message,
+		})
+	}
+
+	runsVersionRules := GetRunsVersionRules()
+	for _, rule := range runsVersionRules.Rules {
 		patternRules = append(patternRules, &types.PatternRule{
 			Category: rule.Category,
 			Pattern:  rule.Pattern,
@@ -116,4 +135,9 @@ func GetExpressionInjectionRuleInstance() *ExpressionInjectionRule {
 // GetOutputHandlingRuleInstance returns a new instance of the output handling rule
 func GetOutputHandlingRuleInstance() *OutputHandlingRule {
 	return NewOutputHandlingRule()
+}
+
+// GetRunsVersionRuleInstance returns a new instance of the runs version rule
+func GetRunsVersionRuleInstance() *RunsVersionRule {
+	return NewRunsVersionRule()
 }

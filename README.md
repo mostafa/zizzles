@@ -12,6 +12,7 @@ Zizzles is a static analysis tool that helps you identify and fix security vulne
 - 🛡️ **Supported Audit Rules**:
     - **Expression Injection**: Identifies dangerous uses of GitHub Actions expressions that could lead to command injection
     - **Output Handling**: Detects insecure output practices, sensitive data leaks, and deprecated output commands
+    - **Runs Version**: Detects deprecated, unsupported, or missing Node.js versions in GitHub Actions `runs` configuration
 - 🎯 **Smart Risk Assessment**: Context-aware analysis with different severity levels (High, Medium, Low)
 - 🔧 **Automated Fixes**: Suggests and applies secure alternatives to vulnerable patterns
 - 📊 **Multiple Output Formats**: Human-readable reports and SARIF 2.2 for tool integration
@@ -57,6 +58,43 @@ steps:
 ```
 
 For detailed information, examples, and mitigation strategies, see our comprehensive [Output Handling Documentation](docs/audit_rules/output_handling.md).
+
+### Runs Version
+
+Runs version vulnerabilities occur when GitHub Actions use deprecated, unsupported, or missing Node.js runtime versions in their `runs` configuration. These issues can expose your workflows to security risks from end-of-life Node.js versions that no longer receive security updates.
+
+**Common runs version issues:**
+- **End-of-life versions**: Using Node.js 12 which no longer receives security updates
+- **Deprecated versions**: Using Node.js 14 which is no longer supported by GitHub Actions
+- **Very old versions**: Using Node.js 10, 8, 6, or 4 with known security vulnerabilities
+- **Unknown versions**: Using unrecognized `nodeXX` versions
+- **Missing specifications**: JavaScript actions without a `using` field declaration
+
+**Example of vulnerable code:**
+```yaml
+# End-of-life Node.js version
+runs:
+  using: node12  # Critical: No longer supported!
+  main: index.js
+
+# Missing version specification
+runs:
+  main: index.js  # Should specify 'using: node16' or 'using: node20'
+```
+
+**Safe alternatives:**
+```yaml
+# Use supported Node.js versions
+runs:
+  using: node20  # Recommended (LTS)
+  main: index.js
+
+runs:
+  using: node16  # Also supported
+  main: index.js
+```
+
+For detailed information, examples, and mitigation strategies, see our comprehensive [Runs Version Documentation](docs/audit_rules/runs_version.md).
 
 ## 🚀 Installation
 
@@ -132,6 +170,7 @@ zizzles doc
 # View specific topic
 zizzles doc expression-injection
 zizzles doc output-handling
+zizzles doc runs-version
 ```
 
 **Navigation in documentation viewer:**
@@ -224,10 +263,17 @@ repos:
 8. **Validate user input** before outputting - sanitize user-controlled data
 9. **Quote output usage** - wrap step outputs in quotes when used in shell commands
 
+### Runs Version Security
+10. **Use supported Node.js versions** - stick to node16, node20, or node21
+11. **Avoid deprecated versions** - never use node12 (critical) or node14 (deprecated)
+12. **Specify version explicitly** - always include `using: nodeXX` for JavaScript actions
+13. **Update regularly** - migrate to newer Node.js versions as they become available
+14. **Test before upgrading** - verify your action works with newer Node.js versions
+
 ### General Security
-10. **Review pull requests** from external contributors carefully
-11. **Run zizzles in CI** to catch issues early
-12. **Keep workflows minimal** - reduce the attack surface by limiting complexity
+15. **Review pull requests** from external contributors carefully
+16. **Run zizzles in CI** to catch issues early
+17. **Keep workflows minimal** - reduce the attack surface by limiting complexity
 
 ## 🤝 Contributing
 

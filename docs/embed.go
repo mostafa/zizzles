@@ -9,3 +9,6 @@ var ExpressionInjectionDocs string
 
 //go:embed audit_rules/output_handling.md
 var OutputHandlingDocs string
+
+//go:embed audit_rules/runs_version.md
+var RunsVersionDocs string

@@ -18,6 +18,7 @@ import (
 var availableTopics = map[string]string{
 	"expression-injection": docs.ExpressionInjectionDocs,
 	"output-handling":      docs.OutputHandlingDocs,
+	"runs-version":         docs.RunsVersionDocs,
 }
 
 // docItem represents a documentation topic in the list
@@ -42,10 +43,10 @@ var docCmd = &cobra.Command{
 Available topics:
   expression-injection    - Learn about expression injection vulnerabilities
   output-handling         - Learn about output handling vulnerabilities
+  runs-version            - Learn about runs version vulnerabilities
 
 Example:
   zizzles doc expression-injection
-  zizzles doc output-handling
   zizzles doc              - Show interactive menu
 
 Navigation:
@@ -307,6 +308,11 @@ func createMenuModel() menuModel {
 			title:       "Output Handling",
 			description: "Learn about output handling vulnerabilities in GitHub Actions",
 			key:         "output-handling",
+		},
+		docItem{
+			title:       "Runs Version",
+			description: "Learn about runs version vulnerabilities in GitHub Actions",
+			key:         "runs-version",
 		},
 	}
 

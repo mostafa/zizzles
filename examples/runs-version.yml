@@ -1,0 +1,135 @@
+# This file demonstrates runs version vulnerabilities that Zizzles can detect.
+#
+# CRITICAL RISK:
+# - node12: End-of-life Node.js version (critical security vulnerability)
+# - node10, node8, node6, node4: Very old unsupported versions
+#
+# HIGH RISK:  
+# - node14: Deprecated Node.js version (no longer supported)
+#
+# MEDIUM RISK:
+# - Unknown node versions (e.g., node99)
+# - Missing 'using' field in JavaScript actions
+#
+# SAFE:
+# - node16, node20, node21: Currently supported versions
+# - docker: Docker-based actions
+# - composite: Composite actions
+#
+# The file covers:
+# - All deprecated and unsupported Node.js versions
+# - Different severity levels
+# - Missing version specifications
+# - Supported versions (no alerts)
+# - Non-Node.js actions (no alerts)
+
+name: Runs Version Examples
+
+# CRITICAL RISK - End-of-life Node.js versions
+runs_critical_node12:
+  name: Critical Node 12 Action
+  description: Uses end-of-life Node.js 12
+  runs:
+    using: node12
+    main: index.js
+
+runs_critical_old_versions:
+  name: Very Old Node Versions
+  description: Uses very old unsupported Node.js versions
+  runs:
+    using: node10  # Critical: Very old and unsupported
+    main: index.js
+
+runs_critical_ancient:
+  name: Ancient Node Version
+  description: Uses ancient Node.js version
+  runs:
+    using: node8   # Critical: Ancient and unsupported
+    main: index.js
+
+# HIGH RISK - Deprecated Node.js versions
+runs_deprecated_node14:
+  name: Deprecated Node 14 Action
+  description: Uses deprecated Node.js 14
+  runs:
+    using: node14
+    main: index.js
+
+# MEDIUM RISK - Unknown Node.js versions
+runs_unknown_version:
+  name: Unknown Node Version
+  description: Uses unknown Node.js version
+  runs:
+    using: node99  # Medium: Unknown version
+    main: index.js
+
+# MEDIUM RISK - Missing using field
+runs_missing_using:
+  name: Missing Using Field
+  description: JavaScript action missing using field
+  runs:
+    main: index.js  # Medium: Missing 'using' field
+
+# SAFE EXAMPLES - Supported Node.js versions
+runs_safe_node16:
+  name: Safe Node 16 Action
+  description: Uses supported Node.js 16
+  runs:
+    using: node16
+    main: index.js
+
+runs_safe_node20:
+  name: Safe Node 20 Action  
+  description: Uses supported Node.js 20
+  runs:
+    using: node20
+    main: index.js
+
+runs_safe_node21:
+  name: Safe Node 21 Action
+  description: Uses supported Node.js 21
+  runs:
+    using: node21
+    main: index.js
+
+# SAFE EXAMPLES - Non-Node.js actions
+runs_docker_action:
+  name: Docker Action
+  description: Uses Docker (not Node.js)
+  runs:
+    using: docker
+    image: Dockerfile
+
+runs_composite_action:
+  name: Composite Action
+  description: Uses composite steps (not Node.js)
+  runs:
+    using: composite
+    steps:
+      - name: Run command
+        run: |
+          echo "This is a composite action"
+
+# COMPLEX EXAMPLES - Multiple configurations
+runs_quoted_deprecated:
+  name: Quoted Deprecated Version
+  description: Uses quoted deprecated version
+  runs:
+    using: "node12"  # Critical: Still detected even when quoted
+    main: index.js
+
+runs_single_quoted:
+  name: Single Quoted Version
+  description: Uses single quoted deprecated version
+  runs:
+    using: 'node14'  # High: Still detected with single quotes
+    main: index.js
+
+runs_with_pre_post:
+  name: Action with pre/post
+  description: Deprecated version with pre/post scripts
+  runs:
+    using: node12    # Critical: Version issue
+    main: index.js
+    pre: pre.js
+    post: post.js 
