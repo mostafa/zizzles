@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -117,6 +118,16 @@ func runAudit(cmd *cobra.Command, args []string) {
 
 	executor := audit_rules.CreateRuleExecutor()
 	allFindings := make(map[types.Category][]*types.Finding)
+
+	origLen := len(files)
+
+	// Deduplicate files
+	files = slices.Compact(files)
+
+	if origLen != len(files) {
+		fmt.Printf("🧹 Deduplicated %d file(s)\n", origLen-len(files))
+	}
+
 	for _, file := range files {
 		absPath, err := filepath.Abs(file)
 		if err != nil {
