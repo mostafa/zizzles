@@ -4,7 +4,7 @@
 
 Expression injection is a critical security vulnerability in GitHub Actions where untrusted user input is directly interpolated into shell commands through GitHub's expression syntax (`${{ ... }}`). This can allow attackers to execute arbitrary commands in your CI/CD environment.
 
-Zizzles' expression injection detection helps you identify and fix these vulnerabilities by analyzing your workflow files and providing automated fixes. **The detection covers multiple vulnerable contexts including shell commands, conditional logic, Docker configurations, and action inputs.**
+Zizzles' expression injection detection helps you identify these vulnerabilities by analyzing your workflow files and providing detailed security analysis. **The detection covers multiple vulnerable contexts including shell commands, conditional logic, Docker configurations, and action inputs.**
 
 ## What is Expression Injection?
 
@@ -66,16 +66,16 @@ Each finding includes:
 
 ### Context-Aware Risk Assessment
 
-Zizzles now provides context-specific risk messages:
+Zizzles provides context-specific risk messages:
 - **Command Execution Risk**: For expressions in `run`, `shell`, `working-directory`, `entrypoint`, etc.
 - **Logic Control Risk**: For expressions in `if` conditions that can manipulate workflow flow
 - **Action Input Risk**: For expressions in `with` blocks where risk depends on action implementation
 
 ## Fixing Expression Injection
 
-### Automatic Fixes
+### Manual Fixes
 
-Zizzles can automatically fix expression injection vulnerabilities by moving unsafe expressions to environment variables:
+To fix expression injection vulnerabilities, move unsafe expressions to environment variables:
 
 **Before (Vulnerable):**
 ```yaml
@@ -97,16 +97,8 @@ steps:
     run: |
       echo "Title: $GITHUB_EVENT_ISSUE_TITLE"
       echo "User: $GITHUB_ACTOR"
-      echo "Repo: ${{ github.repository }}"  # Safe - remains unchanged
+      echo "Repo: ${{ github.repository }}"  # Safe - can remain unchanged
 ```
-
-### Manual Fixes
-
-You can also fix issues manually using the same approach:
-
-1. **Move unsafe expressions to environment variables**
-2. **Use the environment variables in your commands**
-3. **Keep safe expressions as-is**
 
 ### Why This Approach Works
 
@@ -242,7 +234,7 @@ The expression injection detection runs automatically on all workflow files (`*.
 
 - Detection is fast and runs on the AST level for accuracy
 - Large workflows with many expressions may take slightly longer to analyze
-- Fix generation processes each run block independently for safety
+- The analysis processes each vulnerable context independently for comprehensive coverage
 
 ## Vulnerable Fields Detected
 
