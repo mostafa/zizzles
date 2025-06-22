@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"github.com/goccy/go-yaml"
+	"github.com/goccy/go-yaml/ast"
+	"github.com/goccy/go-yaml/parser"
 )
 
 // valueToYAMLString converts a value to a YAML string with proper formatting
@@ -180,17 +182,28 @@ func formatFlowMappingAddition(key, value string, existingContent string) string
 
 // keyExists checks if a key already exists in the mapping
 func keyExists(content string, nodeInfo *NodeInfo, key string) bool {
-	// Parse the content to check if the key exists
-	if nodeInfo == nil || nodeInfo.Content == "" {
+	if nodeInfo == nil {
 		return false
 	}
 
-	// For a more robust implementation, we would parse the YAML and check the mapping
-	// For now, we'll use a simple string-based check
-	lines := strings.Split(nodeInfo.Content, "\n")
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, key+":") {
+	file, err := parser.ParseBytes([]byte(content), parser.ParseComments)
+	if err != nil {
+		return false
+	}
+
+	pathStr := strings.Join(nodeInfo.Path, ".")
+	target, err := findNodeByPath(file, pathStr)
+	if err != nil {
+		return false
+	}
+
+	mapping, ok := target.Node.(*ast.MappingNode)
+	if !ok {
+		return false
+	}
+
+	for _, pair := range mapping.Values {
+		if k, ok := pair.Key.(*ast.StringNode); ok && k.Value == key {
 			return true
 		}
 	}
