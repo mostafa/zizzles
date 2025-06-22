@@ -347,11 +347,11 @@ func applyAdd(content string, nodeInfo *NodeInfo, op AddOp) (string, error) {
 				insertionPoint = findSequenceItemEndInContent(content, nodeInfo)
 			} else {
 				// Regular mapping
-				insertionPoint = findContentEnd(nodeInfo)
+				insertionPoint = findContentEndInContent(content, nodeInfo)
 			}
 		} else {
 			// Regular mapping
-			insertionPoint = findContentEnd(nodeInfo)
+			insertionPoint = findContentEndInContent(content, nodeInfo)
 		}
 
 		if insertionPoint > len(content) {

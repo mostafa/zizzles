@@ -389,3 +389,115 @@ func formatBlockMappingValue(value string, indentation int) string {
 	// If parsing fails, treat as simple string
 	return value
 }
+
+// extractLeadingWhitespace returns the leading whitespace (spaces/tabs) of the
+// line that contains the given byte position. It relies on the original
+// YAML source string so that we can preserve the user's indentation exactly.
+func extractLeadingWhitespace(content string, pos int) string {
+	if pos < 0 || pos >= len(content) {
+		return ""
+	}
+
+	lineStart := findLineStart(content, pos)
+	lineEnd := findLineEnd(content, pos)
+	if lineStart >= lineEnd {
+		return ""
+	}
+
+	line := content[lineStart:lineEnd]
+
+	// Extract run of leading spaces (and tabs) before first non-space.
+	i := 0
+	for i < len(line) {
+		if line[i] != ' ' && line[i] != '\t' {
+			break
+		}
+		i++
+	}
+	return line[:i]
+}
+
+// extractLeadingIndentationForBlockItem mirrors the Rust helper: given a YAML
+// list item that contains a mapping (e.g. a step inside `steps:`), determine
+// the indentation the nested mapping keys should begin at.
+//
+// It walks the line that holds the list dash (`-`) and returns the index
+// *after* that dash + space (or after the continuous sequence of dashes in
+// unusual cases).
+func extractLeadingIndentationForBlockItem(content string, nodeInfo *NodeInfo) int {
+	// Obtain the complete line containing the mapping start.
+	lineStart := findLineStart(content, nodeInfo.StartPos)
+	lineEnd := findLineEnd(content, nodeInfo.StartPos)
+	line := strings.TrimRight(content[lineStart:lineEnd], "\n")
+
+	acceptDash := true
+	for idx, r := range line {
+		switch r {
+		case ' ':
+			acceptDash = true
+		case '-':
+			if acceptDash {
+				acceptDash = false // first dash allowed
+			} else {
+				// second dash in a row that isn't separated by space treat the
+				// previous char as start of scalar, so indentation is idx-1.
+				return idx - 1
+			}
+		default:
+			// On first non-space / non-dash char we decide.
+			if !acceptDash {
+				return idx - 1
+			}
+			return idx
+		}
+	}
+
+	// Reached EOL with nothing but spaces/dashes. This happens for pattern:
+	//   -
+	//     key: val
+	// We indent one space past the line length so nested mapping aligns.
+	return len(line) + 1
+}
+
+// findContentEndInContent returns the absolute byte index (within the original
+// YAML string) of the end of the last non-empty, non-comment line that belongs
+// to the node represented by nodeInfo. This is much more accurate than relying
+// on the parser's EndPos, which often includes trailing comments or the next
+// list item when working inside sequences.
+func findContentEndInContent(content string, nodeInfo *NodeInfo) int {
+	if nodeInfo == nil {
+		return 0
+	}
+
+	segmentStart := nodeInfo.StartPos
+	segmentEnd := nodeInfo.EndPos
+	if segmentStart < 0 {
+		segmentStart = 0
+	}
+	if segmentEnd > len(content) {
+		segmentEnd = len(content)
+	}
+
+	segment := content[segmentStart:segmentEnd]
+	// Walk the lines backwards.
+	lines := strings.Split(segment, "\n")
+
+	// cumulativeOffset tracks length processed so we can compute absolute pos.
+	cumulativeOffset := 0
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := lines[i]
+		if strings.TrimSpace(line) != "" && !strings.HasPrefix(strings.TrimSpace(line), "#") {
+			// position is startPos + bytes up to this line + len(line)
+			// Calculate bytes before this line.
+			bytesBefore := 0
+			for j := 0; j < i; j++ {
+				bytesBefore += len(lines[j]) + 1 // +1 for newline
+			}
+			return segmentStart + bytesBefore + len(line)
+		}
+		cumulativeOffset += len(line) + 1 // not currently used but kept for clarity
+	}
+
+	// Fallback original EndPos.
+	return nodeInfo.EndPos
+}
