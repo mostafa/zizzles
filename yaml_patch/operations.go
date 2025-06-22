@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/parser"
 )
 
@@ -390,86 +391,50 @@ func handleFlowMappingAddition(featureContent string, key string, value any) (st
 
 // applyMergeInto applies a MergeInto operation
 func applyMergeInto(content string, nodeInfo *NodeInfo, op MergeIntoOp) (string, error) {
-	// For MergeInto, we want to work with the parent mapping that contains the key
-	// not the value of the key itself
-	existingKeyPath := append(nodeInfo.Path, op.Key)
-	existingNodeInfo, err := findNodeByPathFromContent(content, strings.Join(existingKeyPath, "."))
+	// Build full path to the key we want to merge into.
+	keyPath := append(nodeInfo.Path, op.Key)
+	joinedKeyPath := strings.Join(keyPath, ".")
+
+	existingNodeInfo, err := findNodeByPathFromContent(content, joinedKeyPath)
 
 	if err == nil {
-		if isMappingValue(op.Value) && isMappingValue(existingNodeInfo.Content) {
-			mergedValue, err := mergeMappings(existingNodeInfo.Content, op.Value)
-			if err != nil {
-				return "", NewError("merge", fmt.Sprintf("failed to merge mappings: %v", err), strings.Join(existingKeyPath, "."))
-			}
-
-			// For env blocks, we need to replace the entire env key-value pair
-			// Find the line that contains "env:" and replace from there
-			lines := strings.Split(content, "\n")
-			envLineIndex := -1
-			for i, line := range lines {
-				if strings.TrimSpace(line) == "env:" {
-					envLineIndex = i
-					break
-				}
-			}
-
-			if envLineIndex == -1 {
-				return "", NewError("merge", "could not find env: line", strings.Join(existingKeyPath, "."))
-			}
-
-			// Calculate the start position of the env: line
-			startPos := 0
-			for i := 0; i < envLineIndex; i++ {
-				startPos += len(lines[i]) + 1 // +1 for newline
-			}
-
-			// Find the end position (end of the env block)
-			endPos := startPos
-			for i := envLineIndex; i < len(lines); i++ {
-				endPos += len(lines[i]) + 1 // +1 for newline
-				// Stop when we hit a line with same or less indentation that's not empty
-				if i > envLineIndex {
-					trimmed := strings.TrimSpace(lines[i])
-					if trimmed != "" && !strings.HasPrefix(lines[i], "  ") {
-						break
-					}
-				}
-			}
-
-			// Ensure bounds are valid
-			if startPos >= len(content) {
-				startPos = len(content) - 1
-			}
-			if endPos > len(content) {
-				endPos = len(content)
-			}
-			if startPos >= endPos {
-				endPos = startPos + 1
-			}
-
-			// Format the merged value as a proper env block
-			mergedStr, err := valueToYAMLString(mergedValue)
-			if err != nil {
-				return "", NewError("serialization", fmt.Sprintf("failed to serialize merged value: %v", err), strings.Join(existingKeyPath, "."))
-			}
-
-			// Format as block mapping with correct indentation
-			formattedValue := formatBlockMappingValue(mergedStr, 3) // 3 levels of indentation for env content
-
-			// Create the replacement content with proper indentation
-			replacement := "    env:\n" + formattedValue
-
-			// Replace the content
-			result := content[:startPos] + replacement + content[endPos:]
-			return result, nil
-		} else {
-			replaceOp := ReplaceOp{Value: op.Value}
-			return applyReplace(content, existingNodeInfo, replaceOp)
+		// Key exists – decide whether to deep-merge or replace.
+		var existingVal any
+		if err := yaml.Unmarshal([]byte(existingNodeInfo.Content), &existingVal); err != nil {
+			// Fallback to string content if unmarshal fails.
+			existingVal = existingNodeInfo.Content
 		}
+
+		// Attempt deep merge when both sides are mappings.
+		if isMappingValue(op.Value) && isMappingValue(existingVal) {
+			merged, err := mergeMappings(existingVal, op.Value)
+			if err != nil {
+				return "", NewError("merge", fmt.Sprintf("failed to merge mappings: %v", err), joinedKeyPath)
+			}
+
+			// Calculate indentation units based on the key line.
+			baseWS := extractLeadingWhitespace(content, existingNodeInfo.StartPos)
+			parentUnits := len(baseWS) / 2
+
+			mergedStr, err := valueToYAMLString(merged)
+			if err != nil {
+				return "", NewError("serialization", fmt.Sprintf("failed to serialize merged mapping: %v", err), joinedKeyPath)
+			}
+
+			formatted := formatBlockMappingValue(mergedStr, parentUnits)
+
+			// Replace from beginning of the value line (indent start) to EndPos
+			start := findLineStart(content, existingNodeInfo.StartPos)
+			end := existingNodeInfo.EndPos
+			newContent := content[:start] + formatted + content[end:]
+			return newContent, nil
+		}
+
+		// Not both mappings – simple replacement.
+		return applyReplace(content, existingNodeInfo, ReplaceOp{Value: op.Value})
 	}
 
-	// Fall back to adding the key since merge isn't possible (key doesn't exist or isn't a mapping)
-	// Convert MergeIntoOp to AddOp using type conversion since they have identical field structures
+	// Key does not exist – fall back to Add.
 	return applyAdd(content, nodeInfo, AddOp(op))
 }
 
