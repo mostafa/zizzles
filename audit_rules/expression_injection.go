@@ -2,14 +2,12 @@ package audit_rules
 
 import (
 	"fmt"
-	"os"
 	"regexp"
 	"strings"
 
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/parser"
 	"github.com/mostafa/zizzles/types"
-	"github.com/mostafa/zizzles/yaml_patch"
 )
 
 const CategoryExpressionInjection types.Category = "expression_injection"
@@ -26,22 +24,17 @@ const (
 	Arbitrary
 )
 
-// ExpressionInjectionRule consolidates all logic and state for expression injection detection and fixing
+// ExpressionInjectionRule consolidates all logic and state for expression injection detection
 type ExpressionInjectionRule struct {
 	types.Rule
 	*types.DeduplicatedRule
 	Expressions         []string
-	EnvVariables        map[string]string
-	FixedRun            string
-	RunBlock            *RunBlockInfo
-	Fix                 *RunBlockFix
 	Findings            []*types.Finding
-	Fixes               []string
 	detector            *ExpressionInjectionDetector
 	contextCapabilities map[string]ContextCapability
 }
 
-// RunBlockInfo contains information about a run block that needs fixing
+// RunBlockInfo contains information about a run block that needs analysis
 type RunBlockInfo struct {
 	Node        ast.Node
 	Path        []string
@@ -49,12 +42,6 @@ type RunBlockInfo struct {
 	Column      int
 	Value       string
 	Expressions []string
-}
-
-// RunBlockFix contains the information needed to fix a run block
-type RunBlockFix struct {
-	EnvVariables map[string]string
-	FixedRun     string
 }
 
 // ExpressionContext represents a parsed GitHub Actions expression context
@@ -81,9 +68,7 @@ func NewExpressionInjectionRule() *ExpressionInjectionRule {
 		},
 		DeduplicatedRule:    types.NewDeduplicatedRule(),
 		Expressions:         make([]string, 0),
-		EnvVariables:        make(map[string]string),
 		Findings:            make([]*types.Finding, 0),
-		Fixes:               make([]string, 0),
 		contextCapabilities: initializeContextCapabilities(),
 	}
 
@@ -773,10 +758,6 @@ func (r *ExpressionInjectionRule) detectExpressionsInDocument(doc ast.Node, file
 
 	// Process each vulnerable block
 	for _, block := range vulnerableBlocks {
-		r.RunBlock = block
-		r.Expressions = block.Expressions
-
-		// Create findings for this block
 		r.createFindingsForRunBlock(block, filePath)
 	}
 }
@@ -945,190 +926,14 @@ func (r *ExpressionInjectionRule) createFindingsForRunBlock(runBlock *RunBlockIn
 	}
 }
 
-// FixFile applies fixes to a YAML file and returns the fixed content using yaml_patch
-func (r *ExpressionInjectionRule) FixFile(filePath string) (string, error) {
-	// Read the file content
-	content, err := readFileContent(filePath)
-	if err != nil {
-		return "", fmt.Errorf("failed to read file: %w", err)
-	}
-
-	// Parse the YAML file to detect issues
-	file, err := parser.ParseFile(filePath, parser.ParseComments)
-	if err != nil {
-		return "", fmt.Errorf("failed to parse YAML file: %w", err)
-	}
-
-	// Clear previous fixes
-	r.Fixes = make([]string, 0)
-
-	// Find all run blocks with expressions
-	runBlocks := r.findVulnerableBlocksWithExpressions(file.Docs[0].Body)
-
-	if len(runBlocks) == 0 {
-		return content, nil // No fixes needed
-	}
-
-	// Create all patches from the original content
-	allPatches := make([]yaml_patch.Patch, 0)
-	for _, runBlock := range runBlocks {
-		runPatches, err := r.createPatchesForRunBlock(runBlock, content)
-		if err != nil {
-			continue // Skip this block if we can't create patches
-		}
-		allPatches = append(allPatches, runPatches...)
-	}
-
-	if len(allPatches) == 0 {
-		return content, nil // No patches to apply
-	}
-
-	// Apply all patches to the original content
-	fixedContent, err := yaml_patch.ApplyYAMLPatches(content, allPatches)
-	if err != nil {
-		return "", fmt.Errorf("failed to apply YAML patches: %w", err)
-	}
-
-	// Record the fixes
-	for _, runBlock := range runBlocks {
-		r.Fixes = append(r.Fixes, fmt.Sprintf("Fixed expression injection in run block at line %d", runBlock.Line))
-	}
-
-	return fixedContent, nil
-}
-
-// createPatchesForRunBlock creates yaml_patch operations for a run block with context filtering
-func (r *ExpressionInjectionRule) createPatchesForRunBlock(runBlock *RunBlockInfo, content string) ([]yaml_patch.Patch, error) {
-	patches := make([]yaml_patch.Patch, 0)
-
-	// Create environment variables only for expressions that are flagged as unsafe
-	envVariables := make(map[string]string)
-	unsafeExpressions := make([]string, 0)
-
-	for _, expr := range runBlock.Expressions {
-		// Analyze the expression context to determine if it's unsafe
-		exprCtx := r.analyzeExpressionContext(expr)
-		if exprCtx == nil {
-			// Skip fixed/safe contexts
-			continue
-		}
-
-		// Only create fixes for unsafe expressions
-		envName := r.toEnvName(expr)
-		envVariables[envName] = fmt.Sprintf("${{ %s }}", expr)
-		unsafeExpressions = append(unsafeExpressions, expr)
-	}
-
-	// If no unsafe expressions, no patches needed
-	if len(unsafeExpressions) == 0 {
-		return patches, nil
-	}
-
-	// Build the path to the run block
-	runPath := strings.Join(runBlock.Path, ".")
-	// Build the path to the step (parent of run)
-	stepPath := strings.Join(runBlock.Path[:len(runBlock.Path)-1], ".")
-
-	// First, create patches for each unsafe expression replacement in the run block
-	for _, expr := range unsafeExpressions {
-		envName := r.toEnvName(expr)
-		expressionPattern := fmt.Sprintf("${{ %s }}", expr)
-		patches = append(patches, yaml_patch.Patch{
-			Path: runPath,
-			Operation: yaml_patch.RewriteFragmentOp{
-				From: expressionPattern,
-				To:   fmt.Sprintf("$%s", envName),
-			},
-		})
-	}
-
-	// Then, add env block to the step (this ensures env comes before run)
-	if len(envVariables) > 0 {
-		patches = append(patches, yaml_patch.Patch{
-			Path: stepPath,
-			Operation: yaml_patch.AddOp{
-				Key:   "env",
-				Value: envVariables,
-			},
-		})
-	}
-
-	return patches, nil
-}
-
-// readFileContent reads the content of a file
-func readFileContent(filePath string) (string, error) {
-	content, err := os.ReadFile(filePath)
-	if err != nil {
-		return "", fmt.Errorf("failed to read file: %w", err)
-	}
-	return string(content), nil
-}
-
-// RewriteRunWithEnv rewrites a run block to use environment variables
-func (r *ExpressionInjectionRule) RewriteRunWithEnv(runContent string, expressions []string) string {
-	fixed := runContent
-
-	for _, expr := range expressions {
-		envName := r.toEnvName(expr)
-		patternStr := `\$\{\{\s*` + regexp.QuoteMeta(expr) + `\s*\}\}`
-		pattern := regexp.MustCompile(patternStr)
-		fixed = pattern.ReplaceAllString(fixed, "$$"+envName)
-	}
-
-	return fixed
-}
-
-// GenerateFixSuggestion generates a human-readable suggestion for fixing expression injection
-func (r *ExpressionInjectionRule) GenerateFixSuggestion() string {
-	if len(r.Expressions) == 0 {
-		return "No expressions found to fix."
-	}
-
-	var sb strings.Builder
-	sb.WriteString("To fix this expression injection vulnerability:\n\n")
-	sb.WriteString("1. Add an 'env:' block to your step:\n")
-	sb.WriteString("```yaml\n")
-	sb.WriteString("- name: Your step name\n")
-	sb.WriteString("  env:\n")
-
-	for _, expr := range r.Expressions {
-		envName := r.toEnvName(expr)
-		sb.WriteString(fmt.Sprintf("    %s: ${{ %s }}\n", envName, expr))
-	}
-
-	sb.WriteString("  run: |\n")
-	sb.WriteString("    # Replace expressions with environment variables\n")
-	sb.WriteString("    # Example: echo \"$ISSUE_TITLE\" instead of echo \"${{ github.event.issue.title }}\"\n")
-	sb.WriteString("```\n\n")
-
-	sb.WriteString("2. Update your run commands to use the environment variables:\n")
-	for _, expr := range r.Expressions {
-		envName := r.toEnvName(expr)
-		sb.WriteString(fmt.Sprintf("   - Replace `${{ %s }}` with `$%s`\n", expr, envName))
-	}
-
-	return sb.String()
-}
-
 // GetFindings returns all findings from the rule
 func (r *ExpressionInjectionRule) GetFindings() []*types.Finding {
 	return r.Findings
 }
 
-// GetFixes returns all applied fixes
-func (r *ExpressionInjectionRule) GetFixes() []string {
-	return r.Fixes
-}
-
 // GetExpressions returns all detected expressions
 func (r *ExpressionInjectionRule) GetExpressions() []string {
 	return r.Expressions
-}
-
-// GetEnvVariables returns the environment variables mapping
-func (r *ExpressionInjectionRule) GetEnvVariables() map[string]string {
-	return r.EnvVariables
 }
 
 // ResetDeduplication resets the deduplication state for testing purposes
