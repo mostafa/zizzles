@@ -185,6 +185,47 @@ func applyReplace(content string, nodeInfo *NodeInfo, op ReplaceOp) (string, err
 		return "", NewError("serialization", fmt.Sprintf("failed to serialize value: %v", err), strings.Join(nodeInfo.Path, "."))
 	}
 
+	// Handle missing-value case (key exists but value is empty). This shows up
+	// when StartPos == EndPos or content is empty.
+	if nodeInfo.StartPos == nodeInfo.EndPos || strings.TrimSpace(nodeInfo.Content) == "" {
+		// We are pointing at the *position* right after the key. Find colon on
+		// the key line and insert.
+		keyLineStart := findLineStart(content, nodeInfo.StartPos)
+		keyLineEnd := findLineEnd(content, nodeInfo.StartPos)
+		keyLine := content[keyLineStart:keyLineEnd]
+
+		// Determine indentation for block scalar or value.
+		indentWS := extractLeadingWhitespace(content, keyLineStart)
+
+		if strVal, ok := op.Value.(string); ok && strings.Contains(strVal, "\n") {
+			// multiline -> literal |
+			lines := strings.Split(strVal, "\n")
+			block := "|\n"
+			for _, l := range lines {
+				block += indentWS + "  " + l + "\n"
+			}
+			block = strings.TrimSuffix(block, "\n")
+
+			// insert block after colon (and any spaces).
+			colonIdx := strings.Index(keyLine, ":")
+			insertPos := keyLineStart + colonIdx + 1
+			for insertPos < len(content) && (content[insertPos] == ' ' || content[insertPos] == '\t') {
+				insertPos++
+			}
+			result := content[:insertPos] + block + content[insertPos:]
+			return result, nil
+		}
+
+		// single line value
+		colonIdx := strings.Index(keyLine, ":")
+		if colonIdx == -1 { // malformed line
+			colonIdx = len(keyLine)
+		}
+		insertPos := keyLineStart + colonIdx + 1
+		result := content[:insertPos] + " " + replacement + content[insertPos:]
+		return result, nil
+	}
+
 	// Check if the replacement value is a multiline string that should be formatted as a literal block
 	if strValue, ok := op.Value.(string); ok && strings.Contains(strValue, "\n") {
 		lines := strings.Split(strValue, "\n")
