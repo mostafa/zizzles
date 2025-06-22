@@ -8,7 +8,15 @@ import (
 
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/parser"
+	"github.com/mostafa/zizzles/yaml_patch"
 )
+
+// Fix represents a single fix for a security finding
+type Fix struct {
+	Title       string             // Human-readable title for the fix
+	Description string             // Detailed description of what the fix does
+	Patches     []yaml_patch.Patch // The YAML patches to apply
+}
 
 // Finding represents a security finding in a YAML file
 type Finding struct {
@@ -21,8 +29,9 @@ type Finding struct {
 	MatchedLineOffset int
 	MatchedLength     int
 	Severity          Severity
-	Indentation       int // Number of spaces/tabs for indentation
-	ActualColumn      int // Column position including indentation
+	Indentation       int   // Number of spaces/tabs for indentation
+	ActualColumn      int   // Column position including indentation
+	Fixes             []Fix // Available fixes for this finding
 }
 
 // NewFinding creates a new Finding from a rule and match information
@@ -46,8 +55,9 @@ func NewFinding(
 		MatchedLineOffset: matchedLineOffset,
 		MatchedLength:     matchedLength,
 		Severity:          rule.Severity,
-		Indentation:       0,      // Will be calculated if needed
-		ActualColumn:      column, // Default to column, will be updated if needed
+		Indentation:       0,       // Will be calculated if needed
+		ActualColumn:      column,  // Default to column, will be updated if needed
+		Fixes:             []Fix{}, // Initialize empty fixes slice
 	}
 }
 
@@ -120,6 +130,7 @@ func NewFindingFromAST(
 		Severity:          rule.Severity,
 		Indentation:       indentation,
 		ActualColumn:      indentation + column,
+		Fixes:             []Fix{}, // Initialize empty fixes slice
 	}
 }
 
@@ -150,6 +161,16 @@ func calculateIndentation(filePath string, line int) int {
 	}
 
 	return indentation
+}
+
+// AddFix adds a fix to the finding
+func (f *Finding) AddFix(fix Fix) {
+	f.Fixes = append(f.Fixes, fix)
+}
+
+// HasFixes returns true if the finding has available fixes
+func (f *Finding) HasFixes() bool {
+	return len(f.Fixes) > 0
 }
 
 // String returns a string representation of the finding
