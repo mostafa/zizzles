@@ -429,9 +429,9 @@ func extractLeadingWhitespace(content string, pos int) string {
 	return line[:i]
 }
 
-// extractLeadingIndentationForBlockItem mirrors the Rust helper: given a YAML
-// list item that contains a mapping (e.g. a step inside `steps:`), determine
-// the indentation the nested mapping keys should begin at.
+// extractLeadingIndentationForBlockItem determines the indentation the nested
+// mapping keys should begin at, given a YAML list item that contains a mapping
+// (e.g. a step inside `steps:`).
 //
 // It walks the line that holds the list dash (`-`) and returns the index
 // *after* that dash + space (or after the continuous sequence of dashes in

@@ -6,8 +6,8 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-// TestEdgeCases contains a subset of tricky scenarios taken from the Rust test
-// -suite.  They ensure comment/format preservation for block & flow styles.
+// TestEdgeCases contains a subset of tricky scenarios.
+// They ensure comment/format preservation for block & flow styles.
 func TestEdgeCases(t *testing.T) {
 	tests := []struct {
 		name     string
