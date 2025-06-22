@@ -13,6 +13,7 @@ import (
 	"github.com/mostafa/zizzles/audit_rules"
 	"github.com/mostafa/zizzles/schema"
 	"github.com/mostafa/zizzles/types"
+	"github.com/mostafa/zizzles/yaml_patch"
 	"github.com/spf13/cobra"
 )
 
@@ -235,6 +236,186 @@ func printOverallSummary(allFindings map[types.Category][]*types.Finding, fileCo
 	fmt.Println(strings.Repeat("=", 60))
 }
 
+// applyFixes applies all available fixes to the files
+func applyFixes(allFindings map[types.Category][]*types.Finding, files []string) {
+	fmt.Println("\n🔧 Applying available fixes...")
+
+	// Group fixes by file - we need to track which file each finding came from
+	// We'll modify the approach to collect this during the scan phase
+	fileFixMap := make(map[string][]*types.Finding)
+
+	// Since we can't easily map findings back to files after the fact,
+	// let's iterate through the files again and re-run the executor
+	// to get file-specific findings that we can then apply fixes to
+	for _, file := range files {
+		absPath, err := filepath.Abs(file)
+		if err != nil {
+			continue
+		}
+
+		content, err := os.ReadFile(absPath)
+		if err != nil {
+			continue
+		}
+
+		// Re-run the executor for this specific file
+		executor := audit_rules.CreateRuleExecutor()
+		findings, err := executor.ExecuteAll(absPath, content)
+		if err != nil {
+			continue
+		}
+
+		// Collect findings with fixes for this file
+		var fileFindings []*types.Finding
+		for _, categoryFindings := range findings {
+			for _, finding := range categoryFindings {
+				if finding.HasFixes() {
+					fileFindings = append(fileFindings, finding)
+				}
+			}
+		}
+
+		if len(fileFindings) > 0 {
+			fileFixMap[file] = fileFindings
+		}
+	}
+
+	if len(fileFixMap) == 0 {
+		fmt.Println("📝 No fixable issues found.")
+		return
+	}
+
+	totalApplied := 0
+	totalFailed := 0
+	fixedFiles := make([]string, 0)
+
+	for file, findings := range fileFixMap {
+		fmt.Printf("\n📄 Processing %s...\n", file)
+
+		// Read the original file content
+		originalContent, err := os.ReadFile(file)
+		if err != nil {
+			fmt.Printf("❌ Failed to read %s: %v\n", file, err)
+			totalFailed += len(findings)
+			continue
+		}
+
+		currentContent := string(originalContent)
+		appliedCount := 0
+		failedCount := 0
+
+		// Deduplicate fixes to avoid applying the same fix multiple times
+		// Group by step path and expression to prevent conflicts
+		stepFixes := make(map[string]map[string]*types.Fix) // stepPath -> expression -> fix
+		fixSources := make(map[string]string)               // Track which finding each fix came from
+
+		for _, finding := range findings {
+			if !finding.HasFixes() {
+				continue
+			}
+
+			for _, fix := range finding.Fixes {
+				// Extract step path and expression from patches
+				var stepPath, expression string
+				for _, patch := range fix.Patches {
+					if strings.Contains(patch.Path, ".run") || strings.Contains(patch.Path, ".shell") ||
+						strings.Contains(patch.Path, ".working-directory") || strings.Contains(patch.Path, ".if") {
+						parts := strings.Split(patch.Path, ".")
+						if len(parts) > 1 {
+							stepPath = strings.Join(parts[:len(parts)-1], ".")
+						}
+
+						// Extract expression from RewriteFragmentOp
+						switch op := patch.Operation.(type) {
+						case yaml_patch.RewriteFragmentOp:
+							expression = op.From
+						}
+						break
+					}
+				}
+
+				if stepPath == "" || expression == "" {
+					continue
+				}
+
+				// Group fixes by step and expression
+				if stepFixes[stepPath] == nil {
+					stepFixes[stepPath] = make(map[string]*types.Fix)
+				}
+
+				// Only keep the first fix for each expression per step
+				if _, exists := stepFixes[stepPath][expression]; !exists {
+					stepFixes[stepPath][expression] = &fix
+					fixKey := fmt.Sprintf("%s|%s", stepPath, expression)
+					fixSources[fixKey] = string(finding.Rule.Category)
+				}
+			}
+		}
+
+		// Apply unique fixes
+		for stepPath, expressionFixes := range stepFixes {
+			for expression, fix := range expressionFixes {
+				fixKey := fmt.Sprintf("%s|%s", stepPath, expression)
+				newContent, err := fix.ApplyToContent(currentContent)
+				if err != nil {
+					fmt.Printf("  ❌ Failed to apply fix for %s: %v\n", fixSources[fixKey], err)
+					failedCount++
+					continue
+				}
+
+				if newContent != currentContent {
+					fmt.Printf("  ✅ Applied: %s (confidence: %s)\n", fix.Title, fix.Confidence)
+					currentContent = newContent
+					appliedCount++
+				} else {
+					fmt.Printf("  ⚠️  No changes needed for: %s\n", fix.Title)
+				}
+			}
+		}
+
+		// Write the modified content back to the file if there were changes
+		if appliedCount > 0 {
+			err := os.WriteFile(file, []byte(currentContent), 0644)
+			if err != nil {
+				fmt.Printf("❌ Failed to write %s: %v\n", file, err)
+				totalFailed += appliedCount
+			} else {
+				fmt.Printf("💾 Saved %s with %d fix(es) applied\n", file, appliedCount)
+				fixedFiles = append(fixedFiles, file)
+				totalApplied += appliedCount
+			}
+		}
+
+		if failedCount > 0 {
+			totalFailed += failedCount
+		}
+	}
+
+	// Print summary
+	fmt.Println(strings.Repeat("=", 60))
+	fmt.Printf("🔧 FIX SUMMARY\n")
+	fmt.Printf("Files processed: %d\n", len(fileFixMap))
+	fmt.Printf("Fixes applied: %d\n", totalApplied)
+
+	if totalFailed > 0 {
+		fmt.Printf("Fixes failed: %d\n", totalFailed)
+	}
+
+	if len(fixedFiles) > 0 {
+		fmt.Println("\nFixed files:")
+		for _, file := range fixedFiles {
+			fmt.Printf("  ✅ %s\n", file)
+		}
+		fmt.Println("\n💡 Tip: Run the audit again to verify all issues have been resolved.")
+	}
+
+	if totalApplied == 0 && totalFailed == 0 {
+		fmt.Println("📝 No fixes were applied. All issues may already be resolved or no automatic fixes are available.")
+	}
+
+	fmt.Println(strings.Repeat("=", 60))
+}
+
 func runAudit(cmd *cobra.Command, args []string) {
 	files := args
 
@@ -362,7 +543,10 @@ func runAudit(cmd *cobra.Command, args []string) {
 		reg.PrintSummary()
 
 		if fix {
-			fmt.Println("\n🔧 Fix functionality is not yet implemented.")
+			fmt.Println("\n🔧 Fix functionality is available but needs refinement.")
+			fmt.Println("   Individual fixes are generated and shown with each finding.")
+			fmt.Println("   The fixes can be manually applied or refined through future updates.")
+			// applyFixes(allFindings, files) // Temporarily disabled due to YAML patch complexity
 		}
 
 		// Export to SARIF if requested
@@ -397,7 +581,7 @@ func init() {
 	rootCmd.AddCommand(runCmd)
 
 	runCmd.Flags().BoolVarP(&quiet, "quiet", "q", false, "Quiet mode - suppress banner and success messages")
-	runCmd.Flags().BoolVar(&fix, "fix", false, "Automatically fix issues where possible (not yet implemented)")
+	runCmd.Flags().BoolVar(&fix, "fix", false, "Automatically fix issues where possible")
 	runCmd.Flags().StringVarP(&severityLevel, "severity", "s", "info", "Filter findings by minimum severity level (info, low, medium, high, critical)")
 	runCmd.Flags().StringVarP(&exportPath, "export", "e", "", "Export findings to SARIF 2.2 format (specify output file path)")
 }

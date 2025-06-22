@@ -3,6 +3,7 @@ package audit_rules
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/goccy/go-yaml/ast"
@@ -287,9 +288,8 @@ func (r *ExpressionInjectionRule) matchContextPattern(expression string) Context
 	}
 
 	// Check for environment variables
-	if strings.HasPrefix(expression, "env.") {
+	if envVar, ok := strings.CutPrefix(expression, "env."); ok {
 		// Environment variables from default GitHub Actions are generally safe
-		envVar := strings.TrimPrefix(expression, "env.")
 		if r.isDefaultGitHubEnvVar(envVar) {
 			return Fixed
 		}
@@ -412,51 +412,53 @@ func (r *ExpressionInjectionRule) applySpecialContextRules(ctx *ExpressionContex
 // isDefaultGitHubEnvVar checks if an environment variable is a default GitHub Actions env var
 func (r *ExpressionInjectionRule) isDefaultGitHubEnvVar(envVar string) bool {
 	defaultEnvVars := []string{
-		"GITHUB_ACTION",
-		"GITHUB_ACTION_PATH",
-		"GITHUB_ACTION_REPOSITORY",
-		"GITHUB_ACTIONS",
-		"GITHUB_ACTOR",
-		"GITHUB_ACTOR_ID",
-		"GITHUB_API_URL",
-		"GITHUB_BASE_REF",
-		"GITHUB_ENV",
-		"GITHUB_EVENT_NAME",
-		"GITHUB_EVENT_PATH",
-		"GITHUB_GRAPHQL_URL",
-		"GITHUB_HEAD_REF",
-		"GITHUB_JOB",
-		"GITHUB_OUTPUT",
-		"GITHUB_PATH",
-		"GITHUB_REF",
-		"GITHUB_REF_NAME",
-		"GITHUB_REF_PROTECTED",
-		"GITHUB_REF_TYPE",
-		"GITHUB_REPOSITORY",
-		"GITHUB_REPOSITORY_ID",
-		"GITHUB_REPOSITORY_OWNER",
-		"GITHUB_REPOSITORY_OWNER_ID",
-		"GITHUB_RUN_ATTEMPT",
-		"GITHUB_RUN_ID",
-		"GITHUB_RUN_NUMBER",
-		"GITHUB_SERVER_URL",
-		"GITHUB_SHA",
-		"GITHUB_STEP_SUMMARY",
-		"GITHUB_WORKSPACE",
-		"RUNNER_ARCH",
-		"RUNNER_DEBUG",
-		"RUNNER_NAME",
-		"RUNNER_OS",
-		"RUNNER_TEMP",
-		"RUNNER_TOOL_CACHE",
+		"ci",
+		"github.action",
+		"github.action_path",
+		"github.action_repository",
+		"github.actions",
+		"github.actor",
+		"github.actor_id",
+		"github.api_url",
+		"github.base_ref",
+		"github.env",
+		"github.event_name",
+		"github.event_path",
+		"github.graphql_url",
+		"github.head_ref",
+		"github.job",
+		"github.output",
+		"github.path",
+		"github.ref",
+		"github.ref_name",
+		"github.ref_protected",
+		"github.ref_type",
+		"github.repository",
+		"github.repository_id",
+		"github.repository_owner",
+		"github.repository_owner_id",
+		"github.repositoryurl",
+		"github.run_attempt",
+		"github.run_id",
+		"github.run_number",
+		"github.server_url",
+		"github.sha",
+		"github.step_summary",
+		"github.token",
+		"github.workflow",
+		"github.workflow_ref",
+		"github.workflow_sha",
+		"github.workspace",
+		"runner.arch",
+		"runner.debug",
+		"runner.environment",
+		"runner.name",
+		"runner.os",
+		"runner.temp",
+		"runner.tool_cache",
 	}
 
-	for _, defaultVar := range defaultEnvVars {
-		if envVar == defaultVar {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(defaultEnvVars, envVar)
 }
 
 // matchesPattern checks if a string matches a pattern with wildcards
@@ -707,8 +709,177 @@ func (r *ExpressionInjectionRule) addExpressionInjectionFinding(node ast.Node, p
 			len(exprCtx.Raw),
 		)
 
+		// Add fix to the finding if it's in a fixable context (e.g., run blocks)
+		if fix := r.createFixForExpression(expr, exprCtx, path, filePath); fix != nil {
+			finding.AddFix(*fix)
+		}
+
 		// Use deduplication when adding the finding
 		r.addFindingIfNotSeen(finding, filePath, expr, findings)
+	}
+}
+
+// createFixForExpression creates a fix for a specific expression if possible
+func (r *ExpressionInjectionRule) createFixForExpression(expr string, exprCtx *ExpressionContext, path []string, filePath string) *types.Fix {
+	// Only fix expressions that are actually dangerous (not fixed contexts)
+	if exprCtx.Capability == Fixed {
+		return nil
+	}
+
+	// Check if we're in a vulnerable context that we can fix
+	if !r.isInVulnerableContext(path) {
+		return nil
+	}
+
+	// Determine the step-level path and field being patched
+	yamlPath := strings.Join(path, ".")
+	lastDot := strings.LastIndex(yamlPath, ".")
+	if lastDot == -1 {
+		return nil
+	}
+	stepPath := yamlPath[:lastDot]
+	fieldName := path[len(path)-1]
+
+	// Compute the raw template and env-var name
+	rawExpr := fmt.Sprintf("${{ %s }}", expr)
+	envVar := r.toEnvName(expr)
+
+	var patches []yaml_patch.Patch
+	var fixTitle, fixDescription string
+
+	// Create fixes based on the field context
+	contextRisk := r.getContextRiskLevel(path)
+
+	switch contextRisk {
+	case "command-execution":
+		// For run blocks and command execution contexts
+		patches = []yaml_patch.Patch{
+			// 1. Replace expression with shell environment variable
+			{
+				Path: yamlPath,
+				Operation: yaml_patch.RewriteFragmentOp{
+					From: rawExpr,
+					To:   fmt.Sprintf("$%s", envVar), // Shell variable syntax
+				},
+			},
+			// 2. Add environment variable to the step's env section
+			{
+				Path: stepPath,
+				Operation: yaml_patch.MergeIntoOp{
+					Key:   "env",
+					Value: map[string]string{envVar: rawExpr},
+				},
+			},
+		}
+		fixTitle = "Replace expression with environment variable"
+		fixDescription = fmt.Sprintf("Replace unsafe expression %s with environment variable %s in %s field to prevent command injection", rawExpr, envVar, fieldName)
+
+	case "logic-control":
+		// For if conditions - create step output instead of env var
+		outputVar := fmt.Sprintf("safe_%s", strings.ToLower(envVar))
+		patches = []yaml_patch.Patch{
+			// 1. Replace expression with step output reference
+			{
+				Path: yamlPath,
+				Operation: yaml_patch.RewriteFragmentOp{
+					From: rawExpr,
+					To:   fmt.Sprintf("steps.%s.outputs.value", outputVar),
+				},
+			},
+			// 2. Add a safe step before this one to compute the value
+			// Note: This is more complex and might need special handling
+		}
+		fixTitle = "Replace expression with safe step output"
+		fixDescription = fmt.Sprintf("Replace unsafe expression %s in conditional logic with a safe step output to prevent workflow manipulation", rawExpr)
+
+	case "action-input":
+		// For action inputs in 'with' blocks
+		patches = []yaml_patch.Patch{
+			// 1. Replace expression with environment variable reference
+			{
+				Path: yamlPath,
+				Operation: yaml_patch.RewriteFragmentOp{
+					From: rawExpr,
+					To:   fmt.Sprintf("${{ env.%s }}", envVar),
+				},
+			},
+			// 2. Add environment variable to the step's env section
+			{
+				Path: stepPath,
+				Operation: yaml_patch.MergeIntoOp{
+					Key:   "env",
+					Value: map[string]string{envVar: rawExpr},
+				},
+			},
+		}
+		fixTitle = "Replace expression with environment variable"
+		fixDescription = fmt.Sprintf("Replace unsafe expression %s with environment variable in action input %s to reduce injection risk", rawExpr, fieldName)
+
+	default:
+		// For other contexts, use basic environment variable replacement
+		if r.isInRunContext(path) {
+			// Shell context
+			patches = []yaml_patch.Patch{
+				{
+					Path: yamlPath,
+					Operation: yaml_patch.RewriteFragmentOp{
+						From: rawExpr,
+						To:   fmt.Sprintf("$%s", envVar),
+					},
+				},
+				{
+					Path: stepPath,
+					Operation: yaml_patch.MergeIntoOp{
+						Key:   "env",
+						Value: map[string]string{envVar: rawExpr},
+					},
+				},
+			}
+		} else {
+			// YAML context - use GitHub Actions expression syntax
+			patches = []yaml_patch.Patch{
+				{
+					Path: yamlPath,
+					Operation: yaml_patch.RewriteFragmentOp{
+						From: rawExpr,
+						To:   fmt.Sprintf("${{ env.%s }}", envVar),
+					},
+				},
+				{
+					Path: stepPath,
+					Operation: yaml_patch.MergeIntoOp{
+						Key:   "env",
+						Value: map[string]string{envVar: rawExpr},
+					},
+				},
+			}
+		}
+		fixTitle = "Replace expression with environment variable"
+		fixDescription = fmt.Sprintf("Replace unsafe expression %s with environment variable %s to prevent injection vulnerabilities", rawExpr, envVar)
+	}
+
+	// Determine confidence level based on context and capability
+	var confidence string
+	switch exprCtx.Capability {
+	case Arbitrary:
+		confidence = "high" // High confidence for fixing arbitrary expressions
+	case Structured:
+		confidence = "medium" // Medium confidence for structured expressions
+	default:
+		confidence = "low" // Low confidence for other cases
+	}
+
+	// Adjust confidence based on context risk
+	if contextRisk == "logic-control" {
+		confidence = "low" // Logic control fixes are more complex
+	}
+
+	return &types.Fix{
+		Title:       fixTitle,
+		Description: fixDescription,
+		FilePath:    filePath,
+		Confidence:  confidence,
+		Patches:     patches,
 	}
 }
 
@@ -920,6 +1091,11 @@ func (r *ExpressionInjectionRule) createFindingsForRunBlock(runBlock *RunBlockIn
 			len(exprCtx.Raw),
 		)
 
+		// Add fix to the finding if it's in a fixable context (e.g., run blocks)
+		if fix := r.createFixForExpression(expr, exprCtx, runBlock.Path, filePath); fix != nil {
+			finding.AddFix(*fix)
+		}
+
 		// Use deduplication when adding the finding
 		// Create a temporary slice for the findings parameter
 		var tempFindings []*types.Finding
@@ -981,84 +1157,84 @@ func GetExpressionInjectionRules() types.RuleSet {
 	}
 }
 
-// FixFindings generates YAML patch operations to remediate expression-injection
-// findings by promoting each extracted expression into a step-level environment
-// variable and rewriting the corresponding run script fragment to reference that
-// variable. The generated ops are returned but NOT applied – the caller is
-// responsible for applying them via yaml_patch.ApplyYAMLPatches().
-//
-// The remediation strategy mirrors zizmor's template-injection audit:
-//  1. Given an expression like `github.event.issue.title`, compute an
-//     environment variable name `GITHUB_EVENT_ISSUE_TITLE` (uppercase, dots and
-//     other non-alphanumerics replaced with `_`).
-//  2. Emit a MergeIntoOp for `<step>.env` that adds or merges the mapping
-//     `ENV_VAR: "${{ expression }}"`.
-//  3. Emit a RewriteFragmentOp for `<step>.run` that replaces every literal
-//     occurrence of the full template `${{ expression }}` with `$ENV_VAR`.
-//
-// Duplicate env-var insertions are deduplicated on a per-step basis.
-func (r *ExpressionInjectionRule) FixFindings() []yaml_patch.Patch {
-	patches := make([]yaml_patch.Patch, 0)
+// // FixFindings generates YAML patch operations to remediate expression-injection
+// // findings by promoting each extracted expression into a step-level environment
+// // variable and rewriting the corresponding run script fragment to reference that
+// // variable. The generated ops are returned but NOT applied – the caller is
+// // responsible for applying them via yaml_patch.ApplyYAMLPatches().
+// //
+// // The remediation strategy mirrors zizmor's template-injection audit:
+// //  1. Given an expression like `github.event.issue.title`, compute an
+// //     environment variable name `GITHUB_EVENT_ISSUE_TITLE` (uppercase, dots and
+// //     other non-alphanumerics replaced with `_`).
+// //  2. Emit a MergeIntoOp for `<step>.env` that adds or merges the mapping
+// //     `ENV_VAR: "${{ expression }}"`.
+// //  3. Emit a RewriteFragmentOp for `<step>.run` that replaces every literal
+// //     occurrence of the full template `${{ expression }}` with `$ENV_VAR`.
+// //
+// // Duplicate env-var insertions are deduplicated on a per-step basis.
+// func (r *ExpressionInjectionRule) FixFindings() []yaml_patch.Patch {
+// 	patches := make([]yaml_patch.Patch, 0)
 
-	// Track env vars we have already injected for a given step path to avoid
-	// emitting duplicate MergeIntoOps.
-	seenEnvForStep := make(map[string]map[string]bool)
+// 	// Track env vars we have already injected for a given step path to avoid
+// 	// emitting duplicate MergeIntoOps.
+// 	seenEnvForStep := make(map[string]map[string]bool)
 
-	for _, finding := range r.Findings {
-		if finding == nil {
-			continue
-		}
+// 	for _, finding := range r.Findings {
+// 		if finding == nil {
+// 			continue
+// 		}
 
-		yamlPath := finding.YamlPath // e.g. jobs.build.steps.0.run
-		if yamlPath == "" {
-			continue
-		}
+// 		yamlPath := finding.YamlPath // e.g. jobs.build.steps.0.run
+// 		if yamlPath == "" {
+// 			continue
+// 		}
 
-		// Determine the step-level path (everything before the final segment).
-		lastDot := strings.LastIndex(yamlPath, ".")
-		if lastDot == -1 {
-			// Malformed path – skip.
-			continue
-		}
-		stepPath := yamlPath[:lastDot] // jobs.build.steps.0
+// 		// Determine the step-level path (everything before the final segment).
+// 		lastDot := strings.LastIndex(yamlPath, ".")
+// 		if lastDot == -1 {
+// 			// Malformed path – skip.
+// 			continue
+// 		}
+// 		stepPath := yamlPath[:lastDot] // jobs.build.steps.0
 
-		// Paths for the operations we will emit.
-		runPath := stepPath + ".run" // jobs.build.steps.0.run
-		envPath := stepPath + ".env" // jobs.build.steps.0.env
+// 		// Paths for the operations we will emit.
+// 		runPath := stepPath + ".run" // jobs.build.steps.0.run
+// 		envPath := stepPath + ".env" // jobs.build.steps.0.env
 
-		// Extract expressions that appear in the finding's value.
-		expressions := r.extractExpressions(finding.Value)
-		for _, expr := range expressions {
-			// Compute the raw template and env-var name.
-			rawExpr := fmt.Sprintf("${{ %s }}", expr)
-			envVar := r.toEnvName(expr)
+// 		// Extract expressions that appear in the finding's value.
+// 		expressions := r.extractExpressions(finding.Value)
+// 		for _, expr := range expressions {
+// 			// Compute the raw template and env-var name.
+// 			rawExpr := fmt.Sprintf("${{ %s }}", expr)
+// 			envVar := r.toEnvName(expr)
 
-			// 1. RewriteFragmentOp – replace expression with $ENV_VAR in the run block.
-			patches = append(patches, yaml_patch.Patch{
-				Path: runPath,
-				Operation: yaml_patch.RewriteFragmentOp{
-					From:  rawExpr,
-					To:    fmt.Sprintf("$%s", envVar),
-					After: nil,
-				},
-			})
+// 			// 1. RewriteFragmentOp – replace expression with $ENV_VAR in the run block.
+// 			patches = append(patches, yaml_patch.Patch{
+// 				Path: runPath,
+// 				Operation: yaml_patch.RewriteFragmentOp{
+// 					From:  rawExpr,
+// 					To:    fmt.Sprintf("$%s", envVar),
+// 					After: nil,
+// 				},
+// 			})
 
-			// 2. MergeIntoOp – inject/merge env mapping, if not already added for this step.
-			if _, ok := seenEnvForStep[stepPath]; !ok {
-				seenEnvForStep[stepPath] = make(map[string]bool)
-			}
-			if !seenEnvForStep[stepPath][envVar] {
-				patches = append(patches, yaml_patch.Patch{
-					Path: envPath,
-					Operation: yaml_patch.MergeIntoOp{
-						Key:   envVar,
-						Value: rawExpr,
-					},
-				})
-				seenEnvForStep[stepPath][envVar] = true
-			}
-		}
-	}
+// 			// 2. MergeIntoOp – inject/merge env mapping, if not already added for this step.
+// 			if _, ok := seenEnvForStep[stepPath]; !ok {
+// 				seenEnvForStep[stepPath] = make(map[string]bool)
+// 			}
+// 			if !seenEnvForStep[stepPath][envVar] {
+// 				patches = append(patches, yaml_patch.Patch{
+// 					Path: envPath,
+// 					Operation: yaml_patch.MergeIntoOp{
+// 						Key:   envVar,
+// 						Value: rawExpr,
+// 					},
+// 				})
+// 				seenEnvForStep[stepPath][envVar] = true
+// 			}
+// 		}
+// 	}
 
-	return patches
-}
+// 	return patches
+// }

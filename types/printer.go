@@ -116,6 +116,12 @@ func (p *Printer) printFindingWithContext(finding *Finding) {
 		context.WriteString("\n")
 	}
 	fmt.Print(context.String())
+
+	// Print available fixes if any
+	if finding.HasFixes() {
+		p.printAvailableFixes(finding.Fixes)
+	}
+
 	fmt.Println()
 }
 
@@ -147,4 +153,35 @@ func (p *Printer) highlightSpecificExpression(line, targetExpression string, sty
 	}
 
 	return line
+}
+
+// printAvailableFixes prints information about available fixes
+func (p *Printer) printAvailableFixes(fixes []Fix) {
+	if p.quiet {
+		return
+	}
+
+	fixStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#00FFFF")).Bold(true)
+	confidenceStyles := map[string]lipgloss.Style{
+		"high":   lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00")),
+		"medium": lipgloss.NewStyle().Foreground(lipgloss.Color("#FFA500")),
+		"low":    lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000")),
+	}
+
+	fmt.Println("  " + fixStyle.Render("Available fixes:"))
+	for i, fix := range fixes {
+		confidenceStyle := confidenceStyles[strings.ToLower(fix.Confidence)]
+		if confidenceStyle.GetForeground() == nil {
+			confidenceStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#FFFFFF"))
+		}
+
+		fmt.Printf("    %d. %s (confidence: %s)\n",
+			i+1,
+			fix.Title,
+			confidenceStyle.Render(fix.Confidence))
+
+		if fix.Description != "" {
+			fmt.Printf("       %s\n", fix.Description)
+		}
+	}
 }

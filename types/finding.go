@@ -15,7 +15,29 @@ import (
 type Fix struct {
 	Title       string             // Human-readable title for the fix
 	Description string             // Detailed description of what the fix does
+	FilePath    string             // Path to the file this fix applies to
+	Confidence  string             // Confidence level for the fix (high, medium, low)
 	Patches     []yaml_patch.Patch // The YAML patches to apply
+}
+
+// ApplyToContent applies the fix to the given file content and returns the modified content
+func (f *Fix) ApplyToContent(content string) (string, error) {
+	if len(f.Patches) == 0 {
+		return content, nil
+	}
+
+	// Apply patches using the yaml_patch package
+	result, err := yaml_patch.ApplyYAMLPatches(content, f.Patches)
+	if err != nil {
+		return "", fmt.Errorf("failed to apply YAML patches: %w", err)
+	}
+
+	return result, nil
+}
+
+// IsHighConfidence returns true if this fix has high confidence
+func (f *Fix) IsHighConfidence() bool {
+	return strings.ToLower(f.Confidence) == "high"
 }
 
 // Finding represents a security finding in a YAML file
