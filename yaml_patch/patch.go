@@ -2,6 +2,7 @@ package yaml_patch
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -26,24 +27,58 @@ import (
 // Returns an error if any operation fails. The error includes details about which
 // operation failed and why.
 func ApplyYAMLPatches(content string, patches []Patch) (string, error) {
-	// Parse the YAML to validate it's valid
-	file, err := parser.ParseBytes([]byte(content), parser.ParseComments)
-	if err != nil {
+	// Quick sanity-check that the incoming YAML parses.
+	if _, err := parser.ParseBytes([]byte(content), parser.ParseComments); err != nil {
 		return "", fmt.Errorf("YAML patch error: input is not valid YAML: %w", err)
 	}
 
+	// First pass – locate each patch target in the *original* document so we can
+	// gather the starting byte-span.  We purposely ignore any failures here; a
+	// missing node will be surfaced later when we actually try to apply the
+	// patch against the current document.
+	type positionedPatch struct {
+		start int
+		patch Patch
+	}
+
+	var ordered []positionedPatch
+
+	rootFile, _ := parser.ParseBytes([]byte(content), parser.ParseComments)
+
+	for _, p := range patches {
+		if nodeInfo, err := findNodeByPath(rootFile, p.Path); err == nil {
+			ordered = append(ordered, positionedPatch{start: nodeInfo.StartPos, patch: p})
+		} else {
+			// If we cannot locate it yet (e.g. key to be added later), treat the
+			// start as 0 so it will be applied last (i.e. safely after other
+			// changes).
+			ordered = append(ordered, positionedPatch{start: 0, patch: p})
+		}
+	}
+
+	// Sort descending by starting byte position so later-in-file edits are
+	// performed first, keeping earlier spans stable.
+	sort.SliceStable(ordered, func(i, j int) bool {
+		return ordered[i].start > ordered[j].start
+	})
+
+	// Now apply patches in that order.
 	result := content
 
-	// Apply each patch
-	for _, patch := range patches {
-		// Find the node at the path
-		nodeInfo, err := findNodeByPath(file, patch.Path)
+	for _, pp := range ordered {
+		// Parse *current* document to locate the feature fresh; this ensures the
+		// path is still valid after prior modifications.
+		file, err := parser.ParseBytes([]byte(result), parser.ParseComments)
 		if err != nil {
-			return "", fmt.Errorf("YAML patch error at %s: %w", patch.Path, err)
+			return "", fmt.Errorf("YAML patch error: intermediate result became invalid YAML: %w", err)
 		}
 
-		// Apply the operation
-		switch op := patch.Operation.(type) {
+		nodeInfo, err := findNodeByPath(file, pp.patch.Path)
+		if err != nil {
+			return "", fmt.Errorf("YAML patch error at %s: %w", pp.patch.Path, err)
+		}
+
+		switch op := pp.patch.Operation.(type) {
 		case RewriteFragmentOp:
 			result, err = applyRewriteFragment(result, nodeInfo, op)
 		case ReplaceOp:
@@ -55,21 +90,15 @@ func ApplyYAMLPatches(content string, patches []Patch) (string, error) {
 		case RemoveOp:
 			result, err = applyRemove(result, nodeInfo, op)
 		default:
-			return "", fmt.Errorf("YAML patch error at %s: unknown operation type", patch.Path)
+			err = fmt.Errorf("unknown operation type")
 		}
 
 		if err != nil {
-			return "", fmt.Errorf("YAML patch error at %s: %w", patch.Path, err)
-		}
-
-		// Re-parse the result to update the file for next operations
-		file, err = parser.ParseBytes([]byte(result), parser.ParseComments)
-		if err != nil {
-			return "", fmt.Errorf("YAML patch error: result is not valid YAML: %w", err)
+			return "", fmt.Errorf("YAML patch error at %s: %w", pp.patch.Path, err)
 		}
 	}
 
-	// Ensure result ends with a newline to match expected format
+	// Ensure the final document ends with a newline for consistency.
 	if !strings.HasSuffix(result, "\n") {
 		result += "\n"
 	}
