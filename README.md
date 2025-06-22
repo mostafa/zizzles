@@ -5,7 +5,7 @@
 Zizzles is a static analysis tool that helps you identify and fix security vulnerabilities in your GitHub Actions workflows. It is inspired by [zizmor](https://github.com/zizmorcore/zizmor), a security scanner for GitHub Actions workflows written in Rust.
 
 > [!NOTE]
-> Zizzles is a work in progress and is not yet ready for production use.
+> Zizzles is a work in progress and is not yet ready for production use. Feel free to experiment with it and report issues.
 
 ## ✨ Features
 
