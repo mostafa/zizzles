@@ -2,11 +2,9 @@ package yaml_patch
 
 import (
 	"fmt"
-	"sort"
 	"strconv"
 	"strings"
 
-	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/parser"
 )
 
@@ -362,36 +360,32 @@ func applyAdd(content string, nodeInfo *NodeInfo, op AddOp) (string, error) {
 // handleFlowMappingAddition inserts the key/value into an existing single-line
 // flow mapping string ("{ a: 1 }") while preserving flow formatting.
 func handleFlowMappingAddition(featureContent string, key string, value any) (string, error) {
-	// Deserialize existing mapping.
-	var existing map[string]any
-	if err := yaml.Unmarshal([]byte(featureContent), &existing); err != nil {
-		return "", NewError("serialization", fmt.Sprintf("failed to parse existing flow mapping: %v", err), "")
-	}
+	// We need to preserve the original ordering of keys in the mapping. Since
+	// YAML maps are unordered after Unmarshal, we re-parse the original string
+	// to obtain the existing pair order.
 
-	if _, exists := existing[key]; exists {
-		return "", NewError("add", fmt.Sprintf("key '%s' already exists in flow mapping", key), "")
-	}
+	trimmed := strings.TrimSpace(featureContent)
+	inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(trimmed, "{"), "}"))
 
-	existing[key] = value
-
-	// Create deterministic ordering (alphabetical).
-	keys := make([]string, 0, len(existing))
-	for k := range existing {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	pairs := make([]string, 0, len(keys))
-	for _, k := range keys {
-		v := existing[k]
-		vs, err := valueToYAMLString(v)
-		if err != nil {
-			return "", NewError("serialization", fmt.Sprintf("failed to serialize value: %v", err), "")
+	var orderedPairs []string
+	if inner != "" {
+		segments := strings.Split(inner, ",")
+		for _, seg := range segments {
+			seg = strings.TrimSpace(seg)
+			if seg != "" {
+				orderedPairs = append(orderedPairs, seg)
+			}
 		}
-		pairs = append(pairs, fmt.Sprintf("%s: %s", k, vs))
 	}
 
-	return "{ " + strings.Join(pairs, ", ") + " }", nil
+	// Append the new pair at the end.
+	valueStr, err := valueToYAMLString(value)
+	if err != nil {
+		return "", err
+	}
+	orderedPairs = append(orderedPairs, fmt.Sprintf("%s: %s", key, valueStr))
+
+	return "{ " + strings.Join(orderedPairs, ", ") + " }", nil
 }
 
 // applyMergeInto applies a MergeInto operation
