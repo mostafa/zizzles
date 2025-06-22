@@ -169,7 +169,7 @@ func printFileSummary(filename string, findings map[types.Category][]*types.Find
 }
 
 // printOverallSummary prints an enhanced overall summary
-func printOverallSummary(allFindings map[types.Category][]*types.Finding, minSeverity types.Severity, fileCount int) {
+func printOverallSummary(allFindings map[types.Category][]*types.Finding, fileCount int) {
 	totalCount := 0
 	for _, fs := range allFindings {
 		totalCount += len(fs)
@@ -319,7 +319,7 @@ func runAudit(cmd *cobra.Command, args []string) {
 	}
 
 	// Print overall summary
-	printOverallSummary(allFindings, minSeverity, processedFiles)
+	printOverallSummary(allFindings, processedFiles)
 
 	if len(allFindings) > 0 {
 		filteredCount := 0
