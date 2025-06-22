@@ -350,11 +350,11 @@ func applyAdd(content string, nodeInfo *NodeInfo, op AddOp) (string, error) {
 		}
 
 		// Replace the old flow mapping string with the new content.
-		start := strings.Index(content, nodeInfo.Content)
-		if start == -1 {
-			return "", NewError("add", "could not locate existing flow mapping in content", strings.Join(nodeInfo.Path, "."))
+		start := nodeInfo.StartPos
+		end := nodeInfo.EndPos
+		if start < 0 || end > len(content) || start >= end {
+			return "", NewError("add", "invalid node position for flow mapping", strings.Join(nodeInfo.Path, "."))
 		}
-		end := start + len(nodeInfo.Content)
 		return content[:start] + newContent + content[end:], nil
 	}
 
@@ -427,7 +427,18 @@ func handleFlowMappingAddition(featureContent string, key string, value any) (st
 	}
 	orderedPairs = append(orderedPairs, fmt.Sprintf("%s: %s", key, valueStr))
 
-	return "{ " + strings.Join(orderedPairs, ", ") + " }", nil
+	combined := strings.Join(orderedPairs, ", ")
+
+	lead := ""
+	trail := ""
+	if len(featureContent) > 0 && featureContent[0] == ' ' {
+		lead = " "
+	}
+	if len(featureContent) > 0 && featureContent[len(featureContent)-1] == ' ' {
+		trail = " "
+	}
+
+	return lead + combined + " " + trail, nil
 }
 
 // applyMergeInto applies a MergeInto operation

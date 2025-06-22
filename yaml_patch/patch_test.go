@@ -423,7 +423,7 @@ func contains(s, substr string) bool {
 			}())))
 }
 
-func TestDebugFlowMapping(t *testing.T) {
+func TestFlowMapping(t *testing.T) {
 	content := `jobs:
   test:
     runs-on: ubuntu-latest
