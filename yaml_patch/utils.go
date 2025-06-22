@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/goccy/go-yaml"
-	yamlv3 "gopkg.in/yaml.v3"
 )
 
 // valueToYAMLString converts a value to a YAML string with proper formatting
@@ -104,7 +103,7 @@ func formatBlockMappingAddition(key, value string, indentation int) string {
 
 	// Try to parse as YAML mapping
 	var parsed map[string]any
-	err := yamlv3.Unmarshal([]byte(value), &parsed)
+	err := yaml.Unmarshal([]byte(value), &parsed)
 	if err == nil && len(parsed) > 0 {
 		// It's a mapping, format as nested YAML
 		result := "\n" + indent + key + ":"
@@ -115,7 +114,7 @@ func formatBlockMappingAddition(key, value string, indentation int) string {
 				line += vs
 			} else {
 				// Fallback to YAML marshal for non-string values
-				bytes, _ := yamlv3.Marshal(v)
+				bytes, _ := yaml.Marshal(v)
 				line += strings.TrimSpace(string(bytes))
 			}
 			result += line
@@ -238,7 +237,7 @@ func isMappingValue(value any) bool {
 	case string:
 		// Try to parse the string as YAML to see if it's a mapping
 		var parsed any
-		if err := yamlv3.Unmarshal([]byte(v), &parsed); err == nil {
+		if err := yaml.Unmarshal([]byte(v), &parsed); err == nil {
 			switch parsed.(type) {
 			case map[string]any:
 				return true
@@ -271,7 +270,7 @@ func mergeMappings(existing, new any) (any, error) {
 		existingMap = existingVal
 	case string:
 		// Try to parse the string as YAML
-		if err := yamlv3.Unmarshal([]byte(existingVal), &existingMap); err != nil {
+		if err := yaml.Unmarshal([]byte(existingVal), &existingMap); err != nil {
 			// If parsing fails, try to parse as a simple key-value pair
 			if strings.Contains(existingVal, ":") && !strings.Contains(existingVal, "\n") {
 				parts := strings.SplitN(existingVal, ":", 2)
@@ -295,7 +294,7 @@ func mergeMappings(existing, new any) (any, error) {
 	case map[string]any:
 		newMap = newVal
 	case string:
-		if err := yamlv3.Unmarshal([]byte(newVal), &newMap); err != nil {
+		if err := yaml.Unmarshal([]byte(newVal), &newMap); err != nil {
 			return new, nil // Return new value as-is if parsing fails
 		}
 	}
@@ -356,7 +355,7 @@ func formatBlockMappingValue(value string, indentation int) string {
 
 	// Try to parse the value as YAML to see if it's a mapping
 	var parsed map[string]any
-	if err := yamlv3.Unmarshal([]byte(value), &parsed); err == nil && len(parsed) > 0 {
+	if err := yaml.Unmarshal([]byte(value), &parsed); err == nil && len(parsed) > 0 {
 		// It's a mapping, format as block mapping
 		result := ""
 
@@ -376,7 +375,7 @@ func formatBlockMappingValue(value string, indentation int) string {
 				line += vs
 			} else {
 				// Fallback to YAML marshal for non-string values
-				bytes, _ := yamlv3.Marshal(v)
+				bytes, _ := yaml.Marshal(v)
 				line += strings.TrimSpace(string(bytes))
 			}
 			result += line

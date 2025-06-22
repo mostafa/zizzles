@@ -2,9 +2,11 @@ package yaml_patch
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
+	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/parser"
 )
 
@@ -290,43 +292,34 @@ func applyReplace(content string, nodeInfo *NodeInfo, op ReplaceOp) (string, err
 
 // applyAdd applies an Add operation
 func applyAdd(content string, nodeInfo *NodeInfo, op AddOp) (string, error) {
-	// Check if we're trying to add to a key that has a flow mapping value
-	// In this case, we need to add to the flow mapping value, not the parent mapping
-	if nodeInfo.Style == FlowMapping {
-		// We're already at a flow mapping, add to it
-		if keyExists(content, nodeInfo, op.Key) {
-			return "", NewError("add", fmt.Sprintf("key '%s' already exists at path %s", op.Key, strings.Join(nodeInfo.Path, ".")), strings.Join(nodeInfo.Path, "."))
-		}
-
-		valueStr, err := valueToYAMLString(op.Value)
-		if err != nil {
-			return "", NewError("serialization", fmt.Sprintf("failed to serialize value: %v", err), strings.Join(nodeInfo.Path, "."))
-		}
-
-		addition := formatFlowMappingAddition(op.Key, valueStr, nodeInfo.Content)
-
-		// For flow mappings, we need to find the exact position of the flow mapping in the content
-		// and replace it entirely
-		flowMappingStart := strings.Index(content, nodeInfo.Content)
-		if flowMappingStart == -1 {
-			return "", NewError("add", "could not find flow mapping in content", strings.Join(nodeInfo.Path, "."))
-		}
-
-		flowMappingEnd := flowMappingStart + len(nodeInfo.Content)
-
-		// Replace the flow mapping with the new one
-		result := content[:flowMappingStart] + addition + content[flowMappingEnd:]
-		return result, nil
+	// Disallow adding into multiline flow mappings for now – complex to keep
+	// formatting.
+	if nodeInfo.Style == MultilineFlowMapping {
+		return "", NewError("add", "multiline flow mappings are not yet supported for add operations", strings.Join(nodeInfo.Path, "."))
 	}
 
-	// Check if the current node is a mapping that contains a flow mapping value
-	// In this case, we need to find the flow mapping value and add to it
-	if nodeInfo.Style == BlockMapping {
-		// Check if any of the values in this mapping are flow mappings
-		// This is a simplified check - in a full implementation, we would traverse the AST
-		// For now, we'll assume that if we're at a block mapping and the operation is Add,
-		// we should add to the parent mapping
+	// Handle single-line flow mapping `{ … }`.
+	if nodeInfo.Style == FlowMapping {
+		if keyExists(content, nodeInfo, op.Key) {
+			return "", NewError("add", fmt.Sprintf("key '%s' already exists at path %s", op.Key, strings.Join(nodeInfo.Path, ".")), strings.Join(nodeInfo.Path, "."))
+		}
 
+		newContent, err := handleFlowMappingAddition(nodeInfo.Content, op.Key, op.Value)
+		if err != nil {
+			return "", err
+		}
+
+		// Replace the old flow mapping string with the new content.
+		start := strings.Index(content, nodeInfo.Content)
+		if start == -1 {
+			return "", NewError("add", "could not locate existing flow mapping in content", strings.Join(nodeInfo.Path, "."))
+		}
+		end := start + len(nodeInfo.Content)
+		return content[:start] + newContent + content[end:], nil
+	}
+
+	// Handle block mappings.
+	if nodeInfo.Style == BlockMapping {
 		if keyExists(content, nodeInfo, op.Key) {
 			return "", NewError("add", fmt.Sprintf("key '%s' already exists at path %s", op.Key, strings.Join(nodeInfo.Path, ".")), strings.Join(nodeInfo.Path, "."))
 		}
@@ -336,21 +329,15 @@ func applyAdd(content string, nodeInfo *NodeInfo, op AddOp) (string, error) {
 			return "", NewError("serialization", fmt.Sprintf("failed to serialize value: %v", err), strings.Join(nodeInfo.Path, "."))
 		}
 
-		// For block mappings, we need to find the correct insertion point
+		// Determine insertion point.
 		var insertionPoint int
-
-		// Check if this is a sequence item (path ends with a number)
 		if len(nodeInfo.Path) > 0 {
-			lastPathElement := nodeInfo.Path[len(nodeInfo.Path)-1]
-			if _, err := strconv.Atoi(lastPathElement); err == nil {
-				// This is a sequence item mapping, we need to find where this item ends
+			if _, err := strconv.Atoi(nodeInfo.Path[len(nodeInfo.Path)-1]); err == nil {
 				insertionPoint = findSequenceItemEndInContent(content, nodeInfo)
 			} else {
-				// Regular mapping
 				insertionPoint = findContentEndInContent(content, nodeInfo)
 			}
 		} else {
-			// Regular mapping
 			insertionPoint = findContentEndInContent(content, nodeInfo)
 		}
 
@@ -358,20 +345,53 @@ func applyAdd(content string, nodeInfo *NodeInfo, op AddOp) (string, error) {
 			insertionPoint = len(content)
 		}
 
-		// Check if we need to add a newline before the addition
-		addition := formatBlockMappingAddition(op.Key, valueStr, nodeInfo.Indentation)
+		indentSpaces := extractLeadingIndentationForBlockItem(content, nodeInfo)
+		addition := formatBlockMappingAddition(op.Key, valueStr, indentSpaces)
 
-		// Check if there's already a newline at the insertion point
+		// Avoid double newline.
 		if insertionPoint > 0 && content[insertionPoint-1] == '\n' {
-			// Remove the leading newline from the addition if there's already one
 			addition = strings.TrimPrefix(addition, "\n")
 		}
 
-		result := content[:insertionPoint] + addition + content[insertionPoint:]
-		return result, nil
+		return content[:insertionPoint] + addition + content[insertionPoint:], nil
 	}
 
 	return "", NewError("add", fmt.Sprintf("add operation is not permitted against style %s", nodeInfo.Style), strings.Join(nodeInfo.Path, "."))
+}
+
+// handleFlowMappingAddition inserts the key/value into an existing single-line
+// flow mapping string ("{ a: 1 }") while preserving flow formatting.
+func handleFlowMappingAddition(featureContent string, key string, value any) (string, error) {
+	// Deserialize existing mapping.
+	var existing map[string]any
+	if err := yaml.Unmarshal([]byte(featureContent), &existing); err != nil {
+		return "", NewError("serialization", fmt.Sprintf("failed to parse existing flow mapping: %v", err), "")
+	}
+
+	if _, exists := existing[key]; exists {
+		return "", NewError("add", fmt.Sprintf("key '%s' already exists in flow mapping", key), "")
+	}
+
+	existing[key] = value
+
+	// Create deterministic ordering (alphabetical).
+	keys := make([]string, 0, len(existing))
+	for k := range existing {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	pairs := make([]string, 0, len(keys))
+	for _, k := range keys {
+		v := existing[k]
+		vs, err := valueToYAMLString(v)
+		if err != nil {
+			return "", NewError("serialization", fmt.Sprintf("failed to serialize value: %v", err), "")
+		}
+		pairs = append(pairs, fmt.Sprintf("%s: %s", k, vs))
+	}
+
+	return "{ " + strings.Join(pairs, ", ") + " }", nil
 }
 
 // applyMergeInto applies a MergeInto operation
