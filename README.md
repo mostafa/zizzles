@@ -11,8 +11,10 @@ Zizzles is a static analysis tool that helps you identify and fix security vulne
 
 - 🛡️ **Supported Audit Rules**:
     - **Expression Injection**: Identifies dangerous uses of GitHub Actions expressions that could lead to command injection
-    - **Output Handling**: Detects insecure output practices, sensitive data leaks, and deprecated output commands
+    - **Output Handling**: Detects insecure output practices, sensitive data leaks, and deprecated output commands  
     - **Runs Version**: Detects deprecated, unsupported, or missing Node.js versions in GitHub Actions `runs` configuration
+    - **Composite Action**: Analyzes composite actions for security vulnerabilities and best practice violations
+    - **Docker Security**: Identifies security issues in containerized GitHub Actions
 - 🎯 **Smart Risk Assessment**: Context-aware analysis with different severity levels (High, Medium, Low)
 - 🔧 **Automated Fixes**: Suggests and applies secure alternatives to vulnerable patterns
 - 📊 **Multiple Output Formats**: Human-readable reports and SARIF 2.2 for tool integration
@@ -20,81 +22,17 @@ Zizzles is a static analysis tool that helps you identify and fix security vulne
 - 📚 **Interactive Documentation**: Built-in docs with detailed explanations and examples
 - 🎨 **Beautiful CLI**: Modern terminal UI with colors and emojis
 
-## 🚨 Security Vulnerabilities Detected
+## 🛡️ Security Audit Rules
 
-### Expression Injection
+Zizzles detects various security vulnerabilities in GitHub Actions workflows. Each audit rule provides comprehensive coverage including vulnerability detection, examples, and security best practices:
 
-Expression injection is a critical security vulnerability where untrusted user input is directly interpolated into shell commands through GitHub's expression syntax (`${{ ... }}`). This can allow attackers to execute arbitrary commands in your CI/CD environment.
+- **[Expression Injection](docs/audit_rules/expression_injection.md)**: Prevents command injection through unsafe GitHub expression usage
+- **[Output Handling](docs/audit_rules/output_handling.md)**: Detects insecure output practices and sensitive data leaks  
+- **[Runs Version](docs/audit_rules/runs_version.md)**: Identifies deprecated or unsupported Node.js runtime versions
+- **[Composite Action](docs/audit_rules/composite_action.md)**: Analyzes composite actions for security vulnerabilities
+- **[Docker Security](docs/audit_rules/docker_security.md)**: Identifies security issues in containerized actions
 
-**Example of vulnerable code:**
-```yaml
-- name: Process user input
-  run: echo "Hello ${{ github.event.issue.title }}"  # Dangerous!
-```
-
-For detailed information, examples, and mitigation strategies, see our comprehensive [Expression Injection Documentation](docs/audit_rules/expression_injection.md).
-
-### Output Handling
-
-Output handling vulnerabilities occur when workflows improperly manage sensitive data, use deprecated output methods, or create outputs that could leak confidential information. These issues can expose secrets, tokens, and user-controlled data.
-
-**Common output handling issues:**
-- **Secret leakage**: Direct exposure of secrets or tokens in outputs
-- **Deprecated commands**: Using old `::set-output` syntax instead of `$GITHUB_OUTPUT`
-- **Missing descriptions**: Outputs without clear documentation
-- **User input exposure**: Directly outputting user-controlled data without validation
-- **Unsafe shell usage**: Unquoted output usage that could lead to injection
-
-**Example of vulnerable code:**
-```yaml
-outputs:
-  api_key:
-    description: "API key"
-    value: ${{ secrets.API_KEY }}  # Exposes secret!
-  
-steps:
-  - name: Old output method
-    run: echo "::set-output name=result::${{ inputs.user_data }}"  # Deprecated!
-```
-
-For detailed information, examples, and mitigation strategies, see our comprehensive [Output Handling Documentation](docs/audit_rules/output_handling.md).
-
-### Runs Version
-
-Runs version vulnerabilities occur when GitHub Actions use deprecated, unsupported, or missing Node.js runtime versions in their `runs` configuration. These issues can expose your workflows to security risks from end-of-life Node.js versions that no longer receive security updates.
-
-**Common runs version issues:**
-- **End-of-life versions**: Using Node.js 12 which no longer receives security updates
-- **Deprecated versions**: Using Node.js 14 which is no longer supported by GitHub Actions
-- **Very old versions**: Using Node.js 10, 8, 6, or 4 with known security vulnerabilities
-- **Unknown versions**: Using unrecognized `nodeXX` versions
-- **Missing specifications**: JavaScript actions without a `using` field declaration
-
-**Example of vulnerable code:**
-```yaml
-# End-of-life Node.js version
-runs:
-  using: node12  # Critical: No longer supported!
-  main: index.js
-
-# Missing version specification
-runs:
-  main: index.js  # Should specify 'using: node16' or 'using: node20'
-```
-
-**Safe alternatives:**
-```yaml
-# Use supported Node.js versions
-runs:
-  using: node20  # Recommended (LTS)
-  main: index.js
-
-runs:
-  using: node16  # Also supported
-  main: index.js
-```
-
-For detailed information, examples, and mitigation strategies, see our comprehensive [Runs Version Documentation](docs/audit_rules/runs_version.md).
+Each documentation page includes detailed explanations, examples, vulnerability patterns, and recommended security practices.
 
 ## 🚀 Installation
 
@@ -247,33 +185,6 @@ repos:
         language: system
         files: '^\.github/workflows/.*\.ya?ml$'
 ```
-
-## 🎯 Best Practices
-
-### Expression Injection Prevention
-1. **Always use environment variables** for user-controllable data
-2. **Quote your variables** in shell commands: `"$VARIABLE"` not `$VARIABLE`
-3. **Validate input** when possible before using it
-4. **Use safe contexts directly** - no need to wrap `github.repository` in env vars
-
-### Output Handling Security
-5. **Never expose secrets in outputs** - avoid `${{ secrets.* }}` in output values
-6. **Use modern output syntax** - `echo "key=value" >> $GITHUB_OUTPUT` instead of `::set-output`
-7. **Document your outputs** - always provide clear descriptions for action outputs
-8. **Validate user input** before outputting - sanitize user-controlled data
-9. **Quote output usage** - wrap step outputs in quotes when used in shell commands
-
-### Runs Version Security
-10. **Use supported Node.js versions** - stick to node16, node20, or node21
-11. **Avoid deprecated versions** - never use node12 (critical) or node14 (deprecated)
-12. **Specify version explicitly** - always include `using: nodeXX` for JavaScript actions
-13. **Update regularly** - migrate to newer Node.js versions as they become available
-14. **Test before upgrading** - verify your action works with newer Node.js versions
-
-### General Security
-15. **Review pull requests** from external contributors carefully
-16. **Run zizzles in CI** to catch issues early
-17. **Keep workflows minimal** - reduce the attack surface by limiting complexity
 
 ## 🤝 Contributing
 
