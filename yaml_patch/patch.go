@@ -390,74 +390,43 @@ func detectStyle(node ast.Node) Style {
 		return BlockMapping
 	}
 
+	// Helper to inspect the raw YAML representation of the node.
+	getContent := func() string {
+		return strings.TrimSpace(extractNodeContent(node))
+	}
+
 	switch n := node.(type) {
 	case *ast.MappingNode:
-		// For mapping nodes, we need to examine the original YAML content
-		// rather than the serialized content to detect flow style
-		if len(n.Values) == 0 {
-			return BlockMapping
-		}
+		trimmed := getContent()
 
-		// Check if all key-value pairs are on the same line (flow style)
-		// This is a heuristic: if the first and last tokens are close together, it's likely flow style
-		firstToken := n.Values[0].Key.GetToken()
-		lastToken := n.Values[len(n.Values)-1].Value.GetToken()
-
-		if firstToken != nil && lastToken != nil {
-			// If all key-value pairs are on the same line, it's likely a flow mapping
-			if firstToken.Position.Line == lastToken.Position.Line {
-				return FlowMapping
+		// Flow mappings are surrounded by braces { }.
+		if strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") {
+			if strings.Contains(trimmed, "\n") {
+				return MultilineFlowMapping
 			}
-		}
-
-		// For single key-value pairs, check if they're on the same line
-		if len(n.Values) == 1 {
-			keyToken := n.Values[0].Key.GetToken()
-			valueToken := n.Values[0].Value.GetToken()
-			if keyToken != nil && valueToken != nil {
-				// If key and value are on the same line, it's likely flow style
-				if keyToken.Position.Line == valueToken.Position.Line {
-					return FlowMapping
-				}
-			}
-		}
-
-		// Check if this is a block mapping by examining the structure
-		// A block mapping should have the key on one line and the value on the next line with indentation
-		if len(n.Values) == 1 {
-			keyToken := n.Values[0].Key.GetToken()
-			valueToken := n.Values[0].Value.GetToken()
-			if keyToken != nil && valueToken != nil {
-				// If key and value are on different lines, it's a block mapping
-				if keyToken.Position.Line != valueToken.Position.Line {
-					return BlockMapping
-				}
-			}
+			return FlowMapping
 		}
 
 		return BlockMapping
 
 	case *ast.SequenceNode:
-		// Similar logic for sequences
-		if len(n.Values) == 0 {
-			return BlockSequence
-		}
+		trimmed := getContent()
 
-		firstToken := n.Values[0].GetToken()
-		lastToken := n.Values[len(n.Values)-1].GetToken()
-
-		if firstToken != nil && lastToken != nil {
-			if firstToken.Position.Line == lastToken.Position.Line {
-				return FlowSequence
+		// Flow sequences are surrounded by brackets [ ].
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			if strings.Contains(trimmed, "\n") {
+				return MultilineFlowSequence
 			}
+			return FlowSequence
 		}
 
 		return BlockSequence
 
 	case *ast.StringNode:
 		content := n.Value
+
 		if strings.Contains(content, "\n") {
-			// Check for literal or folded style indicators
+			// Literal (|) or folded (>) scalar.
 			if strings.HasPrefix(content, "|") {
 				return MultilineLiteralScalar
 			}
@@ -466,7 +435,7 @@ func detectStyle(node ast.Node) Style {
 			}
 		}
 
-		// Check for quoted styles
+		// Quoted scalars.
 		if strings.HasPrefix(content, `"`) && strings.HasSuffix(content, `"`) {
 			return DoubleQuoted
 		}
@@ -477,8 +446,8 @@ func detectStyle(node ast.Node) Style {
 		return PlainScalar
 
 	case *ast.LiteralNode:
-		content := n.String()
-		if strings.Contains(content, "\n") {
+		// Literal nodes already hold scalar text (often | block literals).
+		if strings.Contains(n.String(), "\n") {
 			return MultilineLiteralScalar
 		}
 		return PlainScalar
