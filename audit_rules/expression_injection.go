@@ -8,6 +8,7 @@ import (
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/parser"
 	"github.com/mostafa/zizzles/types"
+	"github.com/mostafa/zizzles/yaml_patch"
 )
 
 const CategoryExpressionInjection types.Category = "expression_injection"
@@ -978,4 +979,86 @@ func GetExpressionInjectionRules() types.RuleSet {
 			},
 		},
 	}
+}
+
+// FixFindings generates YAML patch operations to remediate expression-injection
+// findings by promoting each extracted expression into a step-level environment
+// variable and rewriting the corresponding run script fragment to reference that
+// variable. The generated ops are returned but NOT applied – the caller is
+// responsible for applying them via yaml_patch.ApplyYAMLPatches().
+//
+// The remediation strategy mirrors zizmor's template-injection audit:
+//  1. Given an expression like `github.event.issue.title`, compute an
+//     environment variable name `GITHUB_EVENT_ISSUE_TITLE` (uppercase, dots and
+//     other non-alphanumerics replaced with `_`).
+//  2. Emit a MergeIntoOp for `<step>.env` that adds or merges the mapping
+//     `ENV_VAR: "${{ expression }}"`.
+//  3. Emit a RewriteFragmentOp for `<step>.run` that replaces every literal
+//     occurrence of the full template `${{ expression }}` with `$ENV_VAR`.
+//
+// Duplicate env-var insertions are deduplicated on a per-step basis.
+func (r *ExpressionInjectionRule) FixFindings() []yaml_patch.Patch {
+	patches := make([]yaml_patch.Patch, 0)
+
+	// Track env vars we have already injected for a given step path to avoid
+	// emitting duplicate MergeIntoOps.
+	seenEnvForStep := make(map[string]map[string]bool)
+
+	for _, finding := range r.Findings {
+		if finding == nil {
+			continue
+		}
+
+		yamlPath := finding.YamlPath // e.g. jobs.build.steps.0.run
+		if yamlPath == "" {
+			continue
+		}
+
+		// Determine the step-level path (everything before the final segment).
+		lastDot := strings.LastIndex(yamlPath, ".")
+		if lastDot == -1 {
+			// Malformed path – skip.
+			continue
+		}
+		stepPath := yamlPath[:lastDot] // jobs.build.steps.0
+
+		// Paths for the operations we will emit.
+		runPath := stepPath + ".run" // jobs.build.steps.0.run
+		envPath := stepPath + ".env" // jobs.build.steps.0.env
+
+		// Extract expressions that appear in the finding's value.
+		expressions := r.extractExpressions(finding.Value)
+		for _, expr := range expressions {
+			// Compute the raw template and env-var name.
+			rawExpr := fmt.Sprintf("${{ %s }}", expr)
+			envVar := r.toEnvName(expr)
+
+			// 1. RewriteFragmentOp – replace expression with $ENV_VAR in the run block.
+			patches = append(patches, yaml_patch.Patch{
+				Path: runPath,
+				Operation: yaml_patch.RewriteFragmentOp{
+					From:  rawExpr,
+					To:    fmt.Sprintf("$%s", envVar),
+					After: nil,
+				},
+			})
+
+			// 2. MergeIntoOp – inject/merge env mapping, if not already added for this step.
+			if _, ok := seenEnvForStep[stepPath]; !ok {
+				seenEnvForStep[stepPath] = make(map[string]bool)
+			}
+			if !seenEnvForStep[stepPath][envVar] {
+				patches = append(patches, yaml_patch.Patch{
+					Path: envPath,
+					Operation: yaml_patch.MergeIntoOp{
+						Key:   envVar,
+						Value: rawExpr,
+					},
+				})
+				seenEnvForStep[stepPath][envVar] = true
+			}
+		}
+	}
+
+	return patches
 }
