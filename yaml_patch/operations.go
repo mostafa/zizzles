@@ -172,8 +172,57 @@ func applyRewriteFragment(content string, nodeInfo *NodeInfo, op RewriteFragment
 		return result, nil
 	}
 
+	// Improved replacement logic to preserve YAML formatting
+	// Find the exact boundaries of the value in the original content
+	originalStart := nodeInfo.StartPos
+	originalEnd := nodeInfo.EndPos
+
+	// Look for proper boundaries by examining the original content context
+	if originalStart >= 0 && originalEnd <= len(content) && originalStart < originalEnd {
+		originalContent := content[originalStart:originalEnd]
+
+		// Check if the original content has trailing whitespace (like newlines) that we need to preserve
+		nodeContentInOriginal := nodeInfo.Content
+		if len(originalContent) > len(nodeContentInOriginal) {
+			// The original content is longer than the node content, likely due to trailing whitespace
+			// Find where the node content ends in the original content
+			nodeEndIndex := strings.Index(originalContent, nodeContentInOriginal)
+			if nodeEndIndex != -1 {
+				nodeEndInOriginal := nodeEndIndex + len(nodeContentInOriginal)
+				if nodeEndInOriginal < len(originalContent) {
+					// There's trailing content (likely whitespace) that we need to preserve
+					trailingContent := originalContent[nodeEndInOriginal:]
+					patchedContent = patchedContent + trailingContent
+				}
+			}
+		}
+	}
+
+	if originalStart > 0 && originalEnd < len(content) {
+		// Check if we need to adjust boundaries to preserve formatting
+		beforeChar := content[originalStart-1]
+		afterChar := content[originalEnd]
+
+		// If the value is after a colon and space, make sure we preserve the space
+		if beforeChar == ' ' && (afterChar == '\n' || afterChar == '\r' || originalEnd == len(content)) {
+			// This looks like a proper YAML key-value pair with space after colon
+			// The positioning is correct, proceed with normal replacement
+		} else if beforeChar == ':' {
+			// The value starts right after a colon without space - this suggests a positioning issue
+			// We should preserve the colon and add a space
+			originalStart = originalStart - 1
+			patchedContent = ": " + patchedContent
+		}
+
+		// Ensure we don't accidentally consume newlines that should be preserved
+		if originalEnd < len(content) && content[originalEnd] == '\n' {
+			// The end position includes the newline, which we want to preserve
+			// Don't adjust - keep the newline as part of the following content
+		}
+	}
+
 	// Replace the content in the original string
-	result := content[:nodeInfo.StartPos] + patchedContent + content[nodeInfo.EndPos:]
+	result := content[:originalStart] + patchedContent + content[originalEnd:]
 	return result, nil
 }
 

@@ -217,11 +217,20 @@ func getNodePosition(node ast.Node) (int, int) {
 		tok := n.GetToken()
 		if tok != nil {
 			start := tok.Position.Offset
-			end := start + len(tok.Value)
-			// Adjust for off-by-one token offset issue
+			// For string nodes, the end position should only include the actual value content
+			// not any trailing whitespace or newlines that are part of the YAML formatting
+			end := start + len(n.Value)
+
+			// Adjust for off-by-one token offset issue, but ensure we don't go negative
 			if start > 0 {
 				start = start - 1
 			}
+
+			// Ensure end position doesn't exceed the start + actual content length
+			if end <= start {
+				end = start + len(n.Value)
+			}
+
 			return start, end
 		}
 	case *ast.LiteralNode:

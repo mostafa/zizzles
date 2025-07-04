@@ -15,7 +15,7 @@ const (
 	ToolName        = "zizzles"
 	ToolVersion     = "1.0.0"
 	ToolURI         = "https://github.com/mostafa/zizzles"
-	ToolDescription = "Security auditing tool for GitHub Actions metadata files"
+	ToolDescription = "Security auditing tool for action metadata files"
 )
 
 // SARIFExporter handles the export of findings to SARIF format

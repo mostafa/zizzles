@@ -451,3 +451,79 @@ func TestFlowMapping(t *testing.T) {
 		t.Errorf("expected content %q, got %q", expectedContent, nodeInfo.Content)
 	}
 }
+
+func TestApplyYAMLPatches_WhitespaceHandling(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  string
+		patches  []Patch
+		expected string
+		wantErr  bool
+	}{
+		{
+			name: "preserve space after colon in key-value pairs",
+			content: `jobs:
+  test:
+    steps:
+      - name: Action with vulnerable input
+        uses: some/action@v1
+        with:
+          title: ${{ github.event.issue.title }}
+          message: ${{ github.event.issue.body }}
+`,
+			patches: []Patch{
+				{
+					Path: "jobs.test.steps.0.with.title",
+					Operation: RewriteFragmentOp{
+						From: "${{ github.event.issue.title }}",
+						To:   "${{ env.GITHUB_EVENT_ISSUE_TITLE }}",
+					},
+				},
+			},
+			expected: `jobs:
+  test:
+    steps:
+      - name: Action with vulnerable input
+        uses: some/action@v1
+        with:
+          title: ${{ env.GITHUB_EVENT_ISSUE_TITLE }}
+          message: ${{ github.event.issue.body }}
+`,
+			wantErr: false,
+		},
+		{
+			name: "preserve space in single line with expression",
+			content: `name: Test
+version: "1.0"
+description: ${{ github.event.issue.title }}
+`,
+			patches: []Patch{
+				{
+					Path: "description",
+					Operation: RewriteFragmentOp{
+						From: "${{ github.event.issue.title }}",
+						To:   "${{ env.GITHUB_EVENT_ISSUE_TITLE }}",
+					},
+				},
+			},
+			expected: `name: Test
+version: "1.0"
+description: ${{ env.GITHUB_EVENT_ISSUE_TITLE }}
+`,
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := ApplyYAMLPatches(tt.content, tt.patches)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ApplyYAMLPatches() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if err == nil && result != tt.expected {
+				t.Errorf("ApplyYAMLPatches() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}

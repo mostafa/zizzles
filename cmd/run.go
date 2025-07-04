@@ -238,8 +238,6 @@ func printOverallSummary(allFindings map[types.Category][]*types.Finding, fileCo
 
 // applyFixes applies all available fixes to the files
 func applyFixes(allFindings map[types.Category][]*types.Finding, files []string) {
-	fmt.Println("\n🔧 Applying available fixes...")
-
 	// Group fixes by file - we need to track which file each finding came from
 	// We'll modify the approach to collect this during the scan phase
 	fileFixMap := make(map[string][]*types.Finding)
@@ -319,10 +317,19 @@ func applyFixes(allFindings map[types.Category][]*types.Finding, files []string)
 				var stepPath, expression string
 				for _, patch := range fix.Patches {
 					if strings.Contains(patch.Path, ".run") || strings.Contains(patch.Path, ".shell") ||
-						strings.Contains(patch.Path, ".working-directory") || strings.Contains(patch.Path, ".if") {
+						strings.Contains(patch.Path, ".working-directory") || strings.Contains(patch.Path, ".if") ||
+						strings.Contains(patch.Path, ".with.") {
 						parts := strings.Split(patch.Path, ".")
 						if len(parts) > 1 {
 							stepPath = strings.Join(parts[:len(parts)-1], ".")
+						}
+
+						// For 'with' context, we need to remove the ".with" part to get the actual step path
+						if strings.Contains(patch.Path, ".with.") {
+							withIndex := strings.LastIndex(stepPath, ".with")
+							if withIndex != -1 {
+								stepPath = stepPath[:withIndex]
+							}
 						}
 
 						// Extract expression from RewriteFragmentOp
@@ -430,7 +437,7 @@ func runAudit(cmd *cobra.Command, args []string) {
 	}
 
 	if !quiet {
-		fmt.Println("🔥 Zizzles is scanning your GitHub Actions metadata for security vulnerabilities...")
+		fmt.Println("🔥 Zizzles is scanning your action metadata for security vulnerabilities...")
 	}
 
 	executor := audit_rules.CreateRuleExecutor()
@@ -543,10 +550,8 @@ func runAudit(cmd *cobra.Command, args []string) {
 		reg.PrintSummary()
 
 		if fix {
-			fmt.Println("\n🔧 Fix functionality is available but needs refinement.")
-			fmt.Println("   Individual fixes are generated and shown with each finding.")
-			fmt.Println("   The fixes can be manually applied or refined through future updates.")
-			// applyFixes(allFindings, files) // Temporarily disabled due to YAML patch complexity
+			fmt.Println("\n🔧 Applying available fixes...")
+			applyFixes(allFindings, files)
 		}
 
 		// Export to SARIF if requested
@@ -563,7 +568,7 @@ func runAudit(cmd *cobra.Command, args []string) {
 	}
 
 	if !quiet {
-		fmt.Println("🎉 No security findings found. Your GitHub Actions metadata is looking good!")
+		fmt.Println("🎉 No security findings found. Your action metadata is looking good!")
 	}
 
 	// Export empty SARIF report if requested
