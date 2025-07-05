@@ -217,30 +217,19 @@ func getNodePosition(node ast.Node) (int, int) {
 		tok := n.GetToken()
 		if tok != nil {
 			start := tok.Position.Offset
-			// For string nodes, the end position should only include the actual value content
-			// not any trailing whitespace or newlines that are part of the YAML formatting
-			end := start + len(n.Value)
-
-			// Adjust for off-by-one token offset issue, but ensure we don't go negative
-			if start > 0 {
-				start = start - 1
-			}
-
-			// Ensure end position doesn't exceed the start + actual content length
-			if end <= start {
-				end = start + len(n.Value)
-			}
-
+			end := start + len(tok.Value)
 			return start, end
 		}
 	case *ast.LiteralNode:
 		tok := n.GetToken()
 		if tok != nil {
 			start := tok.Position.Offset
-			// For literal nodes, we need to get the full content including the multiline content
-			// The token value only contains the | character, but we need the full string
-			fullContent := n.String()
-			end := start + len(fullContent)
+			// For literal nodes, the token value is just the indicator (|, |-, |+, etc.)
+			// We need to calculate the end position based on the actual content
+			// This is a complex calculation that depends on the source content
+			// For now, return a reasonable range that includes the indicator
+			// The actual content bounds will be calculated in getAccurateValueBounds
+			end := start + len(tok.Value)
 			return start, end
 		}
 	case *ast.IntegerNode:
@@ -265,15 +254,16 @@ func getNodePosition(node ast.Node) (int, int) {
 			return start, end
 		}
 	case *ast.MappingValueNode:
-		// For mapping value nodes, we need to find the value's position
-		// The value token offset should be correct for the start
+		// For mapping value nodes, we need to find the value's position precisely
 		if n.Value != nil {
-			valTok := n.Value.GetToken()
-			if valTok != nil {
-				start := valTok.Position.Offset
-				end := start + len(valTok.Value)
-				return start, end
-			}
+			return getNodePosition(n.Value)
+		}
+		// Fallback to token position
+		if n.GetToken() != nil {
+			tok := n.GetToken()
+			start := tok.Position.Offset
+			end := start + len(tok.Value)
+			return start, end
 		}
 	case *ast.MappingNode:
 		if len(n.Values) > 0 {
@@ -292,6 +282,156 @@ func getNodePosition(node ast.Node) (int, int) {
 	}
 	// Fallback: return 0,0
 	return 0, 0
+}
+
+// getAccurateValueBounds finds the precise start and end of a YAML value in the content
+func getAccurateValueBounds(content string, nodeInfo *NodeInfo) (int, int) {
+	// For literal and folded scalars, we need special handling
+	if nodeInfo.Style == MultilineLiteralScalar || nodeInfo.Style == MultilineFoldedScalar {
+		return calculateLiteralBlockBounds(content, nodeInfo)
+	}
+
+	// Use the parsed positions as starting points
+	start := nodeInfo.StartPos
+	end := nodeInfo.EndPos
+
+	// Ensure positions are within content bounds
+	if start < 0 {
+		start = 0
+	}
+	if end > len(content) {
+		end = len(content)
+	}
+
+	// CRITICAL: Ensure start is not greater than end
+	if start >= end {
+		// If positions are invalid, fall back to node content length
+		if start < len(content) {
+			// Try to find the content starting from the start position
+			remaining := content[start:]
+			if len(nodeInfo.Content) > 0 && len(remaining) >= len(nodeInfo.Content) {
+				contentIndex := strings.Index(remaining, nodeInfo.Content)
+				if contentIndex != -1 {
+					actualStart := start + contentIndex
+					actualEnd := actualStart + len(nodeInfo.Content)
+					if actualEnd <= len(content) {
+						return actualStart, actualEnd
+					}
+				}
+			}
+		}
+		// Fallback to a safe range
+		return start, start
+	}
+
+	// Extract the segment we're working with
+	segment := content[start:end]
+
+	// For string values, we need to handle quoted vs unquoted strings
+	nodeContent := nodeInfo.Content
+
+	// If node content is empty, return original bounds
+	if len(nodeContent) == 0 {
+		return start, end
+	}
+
+	// Try to find where the actual node content starts and ends within the segment
+	contentIndex := strings.Index(segment, nodeContent)
+	if contentIndex == -1 {
+		// If we can't find the content, fall back to original bounds
+		return start, end
+	}
+
+	// Calculate the actual bounds of just the content
+	actualStart := start + contentIndex
+	actualEnd := actualStart + len(nodeContent)
+
+	// Ensure the calculated bounds are valid
+	if actualEnd > len(content) {
+		actualEnd = len(content)
+	}
+	if actualStart >= actualEnd {
+		return start, end
+	}
+
+	return actualStart, actualEnd
+}
+
+// calculateLiteralBlockBounds calculates the actual bounds of a literal block (|) or folded block (>) in the content
+func calculateLiteralBlockBounds(content string, nodeInfo *NodeInfo) (int, int) {
+	start := nodeInfo.StartPos
+	if start < 0 || start >= len(content) {
+		return 0, 0
+	}
+
+	// Find the line containing the indicator (|, |-, |+, >, >-, >+)
+	lineStart := start
+	for lineStart > 0 && content[lineStart-1] != '\n' {
+		lineStart--
+	}
+
+	// Find the end of the indicator line
+	indicatorEnd := start
+	for indicatorEnd < len(content) && content[indicatorEnd] != '\n' {
+		indicatorEnd++
+	}
+
+	if indicatorEnd >= len(content) {
+		// No newline found, this shouldn't happen for valid YAML
+		return start, start
+	}
+
+	// The body starts after the indicator line
+	bodyStart := indicatorEnd + 1
+
+	// Calculate the indentation of the content (should be more than the indicator line)
+	indicatorLine := content[lineStart:indicatorEnd]
+	indicatorIndent := 0
+	for _, char := range indicatorLine {
+		if char == ' ' || char == '\t' {
+			indicatorIndent++
+		} else {
+			break
+		}
+	}
+
+	// Find the end of the literal block by looking for lines with less or equal indentation
+	bodyEnd := bodyStart
+	lines := strings.Split(content[bodyStart:], "\n")
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+
+		// Empty lines and comments are part of the block
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			bodyEnd += len(line) + 1 // +1 for newline
+			continue
+		}
+
+		// Calculate line indentation
+		lineIndent := 0
+		for _, char := range line {
+			if char == ' ' || char == '\t' {
+				lineIndent++
+			} else {
+				break
+			}
+		}
+
+		// If this line has less or equal indentation than the indicator, it's not part of the block
+		if lineIndent <= indicatorIndent {
+			break
+		}
+
+		bodyEnd += len(line) + 1 // +1 for newline
+	}
+
+	// Remove the trailing newline if it exists
+	if bodyEnd > bodyStart && bodyEnd <= len(content) && content[bodyEnd-1] == '\n' {
+		bodyEnd--
+	}
+
+	return start, bodyEnd
 }
 
 // extractNodeContent extracts the content of a node as a string

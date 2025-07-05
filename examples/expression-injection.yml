@@ -200,9 +200,11 @@ jobs:
   structured-risk-contexts:
     runs-on: ubuntu-latest
     steps:
+  env:
+    GITHUB_EVENT_ISSUE_HTML_URL: ${{ github.event.issue.html_url }}
       - name: URLs and structured data
         run: |
-          echo "Issue URL: ${{ github.event.issue.html_url }}"
+          echo "Issue URL: $GITHUB_EVENT_ISSUE_HTML_URL"
           echo "User avatar: ${{ github.event.issue.user.avatar_url }}"
           echo "API URL: ${{ github.api_url }}"
       
@@ -279,13 +281,17 @@ jobs:
           echo "Multi-line: ${{
             github.event.comment.body
           }}"
+            env:
+              GITHUB_EVENT_ISSUE_TITLE: ${{ github.event.issue.title }}
+              env:
+                GITHUB_ACTOR: ${{ github.actor }}
       
       - name: Mixed safe and unsafe expressions
         run: |
           echo "Safe repo: ${{ github.repository }}"
-          echo "Unsafe title: ${{ github.event.issue.title }}"
+          echo "Unsafe title: $GITHUB_EVENT_ISSUE_TITLE"
           echo "Safe SHA: ${{ github.sha }}"
-          echo "Unsafe actor: ${{ github.actor }}"
+          echo "Unsafe actor: $GITHUB_ACTOR"
 
   # DOCKER-SPECIFIC VULNERABILITIES
   docker-vulnerabilities:

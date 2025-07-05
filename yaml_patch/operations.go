@@ -2,6 +2,7 @@ package yaml_patch
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -11,218 +12,77 @@ import (
 
 // applyRewriteFragment applies a RewriteFragment operation
 func applyRewriteFragment(content string, nodeInfo *NodeInfo, op RewriteFragmentOp) (string, error) {
-	extractedContent := nodeInfo.Content
+	// Get accurate boundaries for the value content
+	actualStart, actualEnd := getAccurateValueBounds(content, nodeInfo)
 
-	// Special handling for multiline literal and folded scalars
+	// Additional safety check to prevent slice bounds errors
+	if actualStart < 0 || actualEnd < 0 || actualStart > len(content) || actualEnd > len(content) || actualStart > actualEnd {
+		return "", NewError("rewrite", fmt.Sprintf("invalid node boundaries: start=%d, end=%d, content_len=%d", actualStart, actualEnd, len(content)), strings.Join(nodeInfo.Path, "."))
+	}
+
+	// For multiline literal and folded scalars, extract just the body content for replacement
+	var valueContent string
+	var contentStart, contentEnd int
+
 	if nodeInfo.Style == MultilineLiteralScalar || nodeInfo.Style == MultilineFoldedScalar {
-		// In the original YAML, find the position of the indicator (|, |-, |+, >, >-, >+)
-		indicatorStart := nodeInfo.StartPos
-		indicatorEnd := indicatorStart
-		for ; indicatorEnd < len(content); indicatorEnd++ {
-			if content[indicatorEnd] == '\n' {
-				break
-			}
+		// Find the indicator line end
+		indicatorEnd := actualStart
+		for indicatorEnd < len(content) && content[indicatorEnd] != '\n' {
+			indicatorEnd++
 		}
 		if indicatorEnd >= len(content) {
 			return "", NewError("rewrite", "could not find end of multiline indicator line", strings.Join(nodeInfo.Path, "."))
 		}
-		// The header includes the indicator and the newline
-		header := content[indicatorStart : indicatorEnd+1]
-		bodyStart := indicatorEnd + 1
-		bodyEnd := nodeInfo.EndPos
-		if bodyEnd > len(content) {
-			bodyEnd = len(content)
-		}
-		body := content[bodyStart:bodyEnd]
 
-		// Find and replace in the body
-		bias := 0
-		if op.After != nil {
-			bias = *op.After
-		}
-		if bias > len(body) {
-			return "", NewError("rewrite", fmt.Sprintf("replacement scan index %d is out of bounds for feature", bias), strings.Join(nodeInfo.Path, "."))
-		}
-		slice := body[bias:]
-		fromStart := strings.Index(slice, op.From)
-		if fromStart == -1 {
-			return "", NewError("rewrite", fmt.Sprintf("no match for '%s' in feature", op.From), strings.Join(nodeInfo.Path, "."))
-		}
-		fromStart += bias
-		fromEnd := fromStart + len(op.From)
-		patchedBody := body[:fromStart] + op.To + body[fromEnd:]
+		// Content starts after the indicator line
+		contentStart = indicatorEnd + 1
+		contentEnd = actualEnd
 
-		// Reconstruct the full content
-		patchedContent := header + patchedBody
-		result := content[:indicatorStart] + patchedContent + content[bodyEnd:]
-		return result, nil
+		if contentStart > contentEnd || contentStart > len(content) {
+			return "", NewError("rewrite", "invalid multiline content boundaries", strings.Join(nodeInfo.Path, "."))
+		}
+
+		valueContent = content[contentStart:contentEnd]
+	} else {
+		// For regular nodes, use the entire value
+		valueContent = content[actualStart:actualEnd]
+		contentStart = actualStart
+		contentEnd = actualEnd
 	}
 
+	// Apply bias if specified
 	bias := 0
 	if op.After != nil {
 		bias = *op.After
 	}
 
-	if bias > len(extractedContent) {
+	if bias > len(valueContent) {
 		return "", NewError("rewrite", fmt.Sprintf("replacement scan index %d is out of bounds for feature", bias), strings.Join(nodeInfo.Path, "."))
 	}
 
-	slice := extractedContent[bias:]
-	fromStart := strings.Index(slice, op.From)
+	// Search for the pattern within the value content
+	searchContent := valueContent[bias:]
+	fromStart := findFlexibleMatch(searchContent, op.From)
 	if fromStart == -1 {
 		return "", NewError("rewrite", fmt.Sprintf("no match for '%s' in feature", op.From), strings.Join(nodeInfo.Path, "."))
 	}
 
-	fromStart += bias
-	fromEnd := fromStart + len(op.From)
+	// Calculate absolute positions for replacement
+	absoluteFromStart := contentStart + bias + fromStart
+	absoluteFromEnd := absoluteFromStart + len(op.From)
 
-	// Create the patched content
-	patchedContent := extractedContent[:fromStart] + op.To + extractedContent[fromEnd:]
-
-	// Check if the extracted content contains inner quotes that might cause issues
-	// The issue is that the extracted content might be something like: echo 'foo: ...'
-	// where the inner quotes are part of the content, not the outer quotes
-	trimmedContent := strings.TrimSpace(extractedContent)
-	if strings.Contains(trimmedContent, "'") || strings.Contains(trimmedContent, "\"") {
-		// This content contains quotes, we need to be more careful about replacement
-		// The issue is that the nodeInfo.EndPos might be pointing to the wrong position
-		// Let's check if the after content starts with a quote
-		if nodeInfo.EndPos < len(content) {
-			afterChar := content[nodeInfo.EndPos]
-
-			// If the character after our end position is a quote, we need to adjust
-			if afterChar == '"' || afterChar == '\'' {
-				// The end position is correct, but we need to be careful about the replacement
-				// The extracted content is the value inside the outer quotes
-				// We should replace the content as-is, but ensure we don't duplicate quotes
-
-				// Check if the start position is also at a quote
-				startChar := content[nodeInfo.StartPos]
-
-				// Adjust positions to exclude the outer quotes
-				actualStart := nodeInfo.StartPos
-				actualEnd := nodeInfo.EndPos
-
-				if startChar == '"' || startChar == '\'' {
-					actualStart++ // Skip the opening quote
-				}
-
-				// Extract the content without the outer quotes
-				innerContent := content[actualStart:actualEnd]
-
-				// Do the replacement on the inner content
-				innerSlice := innerContent[bias:]
-				innerFromStart := strings.Index(innerSlice, op.From)
-				if innerFromStart == -1 {
-					return "", NewError("rewrite", fmt.Sprintf("no match for '%s' in inner content", op.From), strings.Join(nodeInfo.Path, "."))
-				}
-
-				innerFromStart += bias
-				innerFromEnd := innerFromStart + len(op.From)
-
-				// Create the patched inner content
-				patchedInnerContent := innerContent[:innerFromStart] + op.To + innerContent[innerFromEnd:]
-
-				// Replace the inner content while preserving the outer quotes
-				result := content[:actualStart] + patchedInnerContent + content[actualEnd:]
-				return result, nil
-			}
-		}
+	// Ensure we don't go beyond the content boundaries
+	if absoluteFromEnd > contentEnd {
+		return "", NewError("rewrite", "replacement would exceed value boundaries", strings.Join(nodeInfo.Path, "."))
 	}
 
-	if (strings.HasPrefix(trimmedContent, "'") && strings.HasSuffix(trimmedContent, "'")) ||
-		(strings.HasPrefix(trimmedContent, "\"") && strings.HasSuffix(trimmedContent, "\"")) {
-		// This is a quoted string, we need to adjust the replacement
-		// The extracted content includes the quotes, but we want to replace only the inner content
-		quoteChar := trimmedContent[0]
-		quoteLen := 1
-
-		// Find the actual start and end of the quoted content
-		actualStart := nodeInfo.StartPos
-		actualEnd := nodeInfo.EndPos
-
-		// Adjust for the opening quote
-		if actualStart < len(content) && content[actualStart] == quoteChar {
-			actualStart += quoteLen
-		}
-
-		// Adjust for the closing quote
-		if actualEnd > 0 && actualEnd <= len(content) && content[actualEnd-1] == quoteChar {
-			actualEnd -= quoteLen
-		}
-
-		// Extract the content without quotes
-		innerContent := content[actualStart:actualEnd]
-
-		// Do the replacement on the inner content
-		innerSlice := innerContent[bias:]
-		innerFromStart := strings.Index(innerSlice, op.From)
-		if innerFromStart == -1 {
-			return "", NewError("rewrite", fmt.Sprintf("no match for '%s' in inner content", op.From), strings.Join(nodeInfo.Path, "."))
-		}
-
-		innerFromStart += bias
-		innerFromEnd := innerFromStart + len(op.From)
-
-		// Create the patched inner content
-		patchedInnerContent := innerContent[:innerFromStart] + op.To + innerContent[innerFromEnd:]
-
-		// Replace the inner content while preserving the quotes
-		result := content[:actualStart] + patchedInnerContent + content[actualEnd:]
-		return result, nil
+	// Perform the replacement - bounds checking for final reconstruction
+	if absoluteFromStart < 0 || absoluteFromStart > len(content) || absoluteFromEnd < 0 || absoluteFromEnd > len(content) || absoluteFromStart > absoluteFromEnd {
+		return "", NewError("rewrite", fmt.Sprintf("invalid replacement boundaries: absoluteFromStart=%d, absoluteFromEnd=%d, content_len=%d", absoluteFromStart, absoluteFromEnd, len(content)), strings.Join(nodeInfo.Path, "."))
 	}
 
-	// Improved replacement logic to preserve YAML formatting
-	// Find the exact boundaries of the value in the original content
-	originalStart := nodeInfo.StartPos
-	originalEnd := nodeInfo.EndPos
+	result := content[:absoluteFromStart] + op.To + content[absoluteFromEnd:]
 
-	// Look for proper boundaries by examining the original content context
-	if originalStart >= 0 && originalEnd <= len(content) && originalStart < originalEnd {
-		originalContent := content[originalStart:originalEnd]
-
-		// Check if the original content has trailing whitespace (like newlines) that we need to preserve
-		nodeContentInOriginal := nodeInfo.Content
-		if len(originalContent) > len(nodeContentInOriginal) {
-			// The original content is longer than the node content, likely due to trailing whitespace
-			// Find where the node content ends in the original content
-			nodeEndIndex := strings.Index(originalContent, nodeContentInOriginal)
-			if nodeEndIndex != -1 {
-				nodeEndInOriginal := nodeEndIndex + len(nodeContentInOriginal)
-				if nodeEndInOriginal < len(originalContent) {
-					// There's trailing content (likely whitespace) that we need to preserve
-					trailingContent := originalContent[nodeEndInOriginal:]
-					patchedContent = patchedContent + trailingContent
-				}
-			}
-		}
-	}
-
-	if originalStart > 0 && originalEnd < len(content) {
-		// Check if we need to adjust boundaries to preserve formatting
-		beforeChar := content[originalStart-1]
-		afterChar := content[originalEnd]
-
-		// If the value is after a colon and space, make sure we preserve the space
-		if beforeChar == ' ' && (afterChar == '\n' || afterChar == '\r' || originalEnd == len(content)) {
-			// This looks like a proper YAML key-value pair with space after colon
-			// The positioning is correct, proceed with normal replacement
-		} else if beforeChar == ':' {
-			// The value starts right after a colon without space - this suggests a positioning issue
-			// We should preserve the colon and add a space
-			originalStart = originalStart - 1
-			patchedContent = ": " + patchedContent
-		}
-
-		// Ensure we don't accidentally consume newlines that should be preserved
-		if originalEnd < len(content) && content[originalEnd] == '\n' {
-			// The end position includes the newline, which we want to preserve
-			// Don't adjust - keep the newline as part of the following content
-		}
-	}
-
-	// Replace the content in the original string
-	result := content[:originalStart] + patchedContent + content[originalEnd:]
 	return result, nil
 }
 
@@ -788,4 +648,42 @@ func findSequenceItemEndInContent(content string, nodeInfo *NodeInfo) int {
 	}
 
 	return pos
+}
+
+// findFlexibleMatch finds a GitHub expression in text while handling whitespace variations
+func findFlexibleMatch(text, pattern string) int {
+	// First try exact match for performance
+	if idx := strings.Index(text, pattern); idx != -1 {
+		return idx
+	}
+
+	// Check if it's a GitHub expression pattern
+	if strings.Contains(pattern, "${{") && strings.Contains(pattern, "}}") {
+		// Extract the expression content between ${{ and }}
+		start := strings.Index(pattern, "${{")
+		end := strings.LastIndex(pattern, "}}")
+		if start != -1 && end != -1 && end > start {
+			innerPattern := pattern[start+3 : end]
+			// Normalize whitespace in the pattern
+			innerPattern = strings.TrimSpace(innerPattern)
+			innerPattern = regexp.MustCompile(`\s+`).ReplaceAllString(innerPattern, `\s+`)
+
+			// Create a regex that matches the expression with flexible whitespace
+			regexPattern := regexp.QuoteMeta(pattern[:start]) +
+				`\$\{\{\s*` +
+				regexp.QuoteMeta(innerPattern) +
+				`\s*\}\}` +
+				regexp.QuoteMeta(pattern[end+2:])
+
+			// Try to compile and match the regex
+			if regex, err := regexp.Compile(regexPattern); err == nil {
+				if match := regex.FindStringIndex(text); match != nil {
+					return match[0]
+				}
+			}
+		}
+	}
+
+	// Fallback to original exact match
+	return strings.Index(text, pattern)
 }

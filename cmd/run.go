@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/goccy/go-yaml"
+	"github.com/goccy/go-yaml/parser"
 	"github.com/mostafa/zizzles/audit_rules"
 	"github.com/mostafa/zizzles/schema"
 	"github.com/mostafa/zizzles/types"
@@ -303,9 +304,9 @@ func applyFixes(allFindings map[types.Category][]*types.Finding, files []string)
 		failedCount := 0
 
 		// Deduplicate fixes to avoid applying the same fix multiple times
-		// Group by step path and expression to prevent conflicts
-		stepFixes := make(map[string]map[string]*types.Fix) // stepPath -> expression -> fix
-		fixSources := make(map[string]string)               // Track which finding each fix came from
+		// Create a map to track which patches have already been applied
+		appliedPatches := make(map[string]bool) // patchKey -> applied
+		var uniqueFixes []types.Fix
 
 		for _, finding := range findings {
 			if !finding.HasFixes() {
@@ -313,70 +314,49 @@ func applyFixes(allFindings map[types.Category][]*types.Finding, files []string)
 			}
 
 			for _, fix := range finding.Fixes {
-				// Extract step path and expression from patches
-				var stepPath, expression string
+				// Check if this fix has any patches that haven't been applied yet
+				hasNewPatches := false
 				for _, patch := range fix.Patches {
-					if strings.Contains(patch.Path, ".run") || strings.Contains(patch.Path, ".shell") ||
-						strings.Contains(patch.Path, ".working-directory") || strings.Contains(patch.Path, ".if") ||
-						strings.Contains(patch.Path, ".with.") {
-						parts := strings.Split(patch.Path, ".")
-						if len(parts) > 1 {
-							stepPath = strings.Join(parts[:len(parts)-1], ".")
-						}
-
-						// For 'with' context, we need to remove the ".with" part to get the actual step path
-						if strings.Contains(patch.Path, ".with.") {
-							withIndex := strings.LastIndex(stepPath, ".with")
-							if withIndex != -1 {
-								stepPath = stepPath[:withIndex]
-							}
-						}
-
-						// Extract expression from RewriteFragmentOp
-						switch op := patch.Operation.(type) {
-						case yaml_patch.RewriteFragmentOp:
-							expression = op.From
-						}
+					patchKey := fmt.Sprintf("%s|%s", patch.Path, getPatchOperation(patch.Operation))
+					if !appliedPatches[patchKey] {
+						hasNewPatches = true
 						break
 					}
 				}
 
-				if stepPath == "" || expression == "" {
-					continue
-				}
-
-				// Group fixes by step and expression
-				if stepFixes[stepPath] == nil {
-					stepFixes[stepPath] = make(map[string]*types.Fix)
-				}
-
-				// Only keep the first fix for each expression per step
-				if _, exists := stepFixes[stepPath][expression]; !exists {
-					stepFixes[stepPath][expression] = &fix
-					fixKey := fmt.Sprintf("%s|%s", stepPath, expression)
-					fixSources[fixKey] = string(finding.Rule.Category)
+				if hasNewPatches {
+					// Mark all patches in this fix as applied
+					for _, patch := range fix.Patches {
+						patchKey := fmt.Sprintf("%s|%s", patch.Path, getPatchOperation(patch.Operation))
+						appliedPatches[patchKey] = true
+					}
+					uniqueFixes = append(uniqueFixes, fix)
 				}
 			}
 		}
 
-		// Apply unique fixes
-		for stepPath, expressionFixes := range stepFixes {
-			for expression, fix := range expressionFixes {
-				fixKey := fmt.Sprintf("%s|%s", stepPath, expression)
-				newContent, err := fix.ApplyToContent(currentContent)
-				if err != nil {
-					fmt.Printf("  ❌ Failed to apply fix for %s: %v\n", fixSources[fixKey], err)
+		// Apply unique fixes in order
+		for _, fix := range uniqueFixes {
+			newContent, err := fix.ApplyToContent(currentContent)
+			if err != nil {
+				fmt.Printf("  ❌ Failed to apply fix for %s: %v\n", fix.Title, err)
+				failedCount++
+				continue
+			}
+
+			if newContent != currentContent {
+				// Validate that the result is still valid YAML
+				if err := validateYAML(newContent); err != nil {
+					fmt.Printf("  ❌ Failed to apply fix for %s: would create invalid YAML: %v\n", fix.Title, err)
 					failedCount++
 					continue
 				}
 
-				if newContent != currentContent {
-					fmt.Printf("  ✅ Applied: %s (confidence: %s)\n", fix.Title, fix.Confidence)
-					currentContent = newContent
-					appliedCount++
-				} else {
-					fmt.Printf("  ⚠️  No changes needed for: %s\n", fix.Title)
-				}
+				fmt.Printf("  ✅ Applied: %s (confidence: %s)\n", fix.Title, fix.Confidence)
+				currentContent = newContent
+				appliedCount++
+			} else {
+				fmt.Printf("  ⚠️  No changes needed for: %s\n", fix.Title)
 			}
 		}
 
@@ -421,6 +401,30 @@ func applyFixes(allFindings map[types.Category][]*types.Finding, files []string)
 	}
 
 	fmt.Println(strings.Repeat("=", 60))
+}
+
+// getPatchOperation returns a string representation of the patch operation for deduplication
+func getPatchOperation(op yaml_patch.Operation) string {
+	switch o := op.(type) {
+	case yaml_patch.RewriteFragmentOp:
+		return fmt.Sprintf("RewriteFragment:%s->%s", o.From, o.To)
+	case yaml_patch.ReplaceOp:
+		return fmt.Sprintf("Replace:%v", o.Value)
+	case yaml_patch.AddOp:
+		return fmt.Sprintf("Add:%s=%v", o.Key, o.Value)
+	case yaml_patch.MergeIntoOp:
+		return fmt.Sprintf("MergeInto:%s=%v", o.Key, o.Value)
+	case yaml_patch.RemoveOp:
+		return "Remove"
+	default:
+		return "Unknown"
+	}
+}
+
+// validateYAML checks if the given string is valid YAML
+func validateYAML(content string) error {
+	_, err := parser.ParseBytes([]byte(content), parser.ParseComments)
+	return err
 }
 
 func runAudit(cmd *cobra.Command, args []string) {
